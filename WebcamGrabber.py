@@ -505,13 +505,19 @@ def capture_screenshot():
 
             # Use ffmpeg to capture screenshot
             logging.info("Running ffmpeg to capture screenshot...")
+            startupinfo = None
+            if os.name == 'nt':  # Windows
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
+            
             ffmpeg_cmd = [
                 "ffmpeg", "-y", "-i", stream_url,
                 "-vframes", "1",
                 "-q:v", "2",
                 output_file
             ]
-            subprocess.run(ffmpeg_cmd, capture_output=True, check=True)
+            subprocess.run(ffmpeg_cmd, capture_output=True, check=True, startupinfo=startupinfo)
             
             if os.path.exists(output_file):
                 file_size = os.path.getsize(output_file)
