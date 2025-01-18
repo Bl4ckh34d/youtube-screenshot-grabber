@@ -5,24 +5,27 @@ A Windows system tray application that automatically captures screenshots from Y
 ## Features
 
 - 🎥 Capture screenshots from any YouTube video/stream
+- 🎯 Multiple resolution options (480p, 720p, 1080p, best)
 - ⚙️ Configurable screenshot intervals (5-60 seconds)
+- 🌅 Optional sunrise/sunset scheduling
+- 📍 Location-based scheduling support
 - 📂 Customizable output directory
 - 🔔 System notifications for captures and errors
 - 🖥️ Runs silently in system tray
-- 🎯 Easy-to-use context menu interface
+- 🎮 Easy-to-use context menu interface
+- 🚀 Minimal resource usage
 
 ## Requirements
 
 - Windows OS
 - Python 3.10+
 - FFmpeg (added to system PATH)
-- yt-dlp
 
 ## Installation
 
 1. Clone this repository:
 ```bash
-git clone https://github.com/yourusername/youtube-screenshot-grabber.git
+git clone https://github.com/Bl4ckh34d/youtube-screenshot-grabber.git
 cd youtube-screenshot-grabber
 ```
 
@@ -35,40 +38,63 @@ pip install -r requirements.txt
 
 ## Usage
 
-1. Run the application:
-```bash
-python WebcamGrabber.py
-```
-
+### Quick Start
+1. Double-click `Start WebcamGrabber.bat` to run the application
 2. Look for the camera icon in your system tray (bottom right of taskbar)
+3. Right-click the icon to access all features
 
-3. Right-click the icon to:
-   - Set YouTube URL
-   - Change screenshot interval (5-60 seconds)
-   - Select output folder
-   - Quit the application
+### Silent Start
+For a completely headless start without any console window:
+- Double-click `Start-Silent.vbs`
 
-4. Screenshots will be saved to the selected output folder with timestamp-based filenames
+### System Tray Menu Options
+- Set/Change YouTube URL
+- Select screenshot resolution (480p, 720p, 1080p, best)
+- Adjust capture interval (5-60 seconds)
+- Choose output folder
+- Configure location for sunrise/sunset scheduling
+- Toggle scheduling on/off
+- Pause/Resume captures
+- Exit application
 
-## Building Executable
+### Advanced Features
 
-To create a standalone executable:
+#### Sunrise/Sunset Scheduling
+The application can automatically:
+- Detect your location (using IP geolocation)
+- Calculate sunrise and sunset times
+- Only capture screenshots during daylight hours
+- Adjust schedule daily based on changing sunrise/sunset times
 
-```bash
-python -m PyInstaller --onefile --noconsole --icon=app.ico --hidden-import plyer.platforms.win.notification --hidden-import pystray._win32 --hidden-import PIL._tkinter --hidden-import tkinter --hidden-import tkinter.filedialog WebcamGrabber.py
-```
+#### Resolution Selection
+Choose from multiple quality options:
+- 480p: Fastest, lowest quality
+- 720p: Balanced option
+- 1080p: High quality (default)
+- Best: Highest available quality
 
-The executable will be created in the `dist` folder.
+## Configuration
+
+The application saves all settings in `config.json`, including:
+- Last used YouTube URL
+- Selected output path
+- Preferred screenshot interval
+- Selected resolution
+- Location settings
+- Schedule preferences
 
 ## Dependencies
 
-- PIL (Pillow): Image processing
+All required packages are specified in `requirements.txt` with version numbers:
+- customtkinter: Modern GUI elements
+- Pillow (PIL): Image processing
 - pystray: System tray functionality
 - plyer: System notifications
 - yt-dlp: YouTube video processing
-- FFmpeg: Screenshot capture
 - astral: Sunrise/sunset calculations
-- tkinter: GUI dialogs
+- tkintermapview: Location selection
+- tzlocal: Timezone handling
+- requests: Network requests
 
 ## License
 
