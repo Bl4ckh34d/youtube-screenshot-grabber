@@ -3,3 +3,4 @@ plyer
 pystray
 Pillow
 yt-dlp
+customtkinter
