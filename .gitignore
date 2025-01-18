@@ -47,3 +47,7 @@ ENV/
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+# App specific
+config.json
+app.ico
