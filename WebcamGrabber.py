@@ -47,6 +47,7 @@ DEFAULT_SETTINGS = {
     'youtube_url': None,  # default to None, will be set by user
     'is_paused': True,  # Start paused until URL is set
     'schedule_enabled': False,
+    'preferred_resolution': '1080p',  # Default to 1080p
     'location': {
         'name': "",
         'region': "",
@@ -171,6 +172,81 @@ def get_sun_times():
 
 def set_location(icon, item):
     """Open dialog to set location."""
+    def cleanup_map():
+        """Clean up map widget"""
+        map_widget.destroy()
+
+    def update_sun_times(lat, lon):
+        """Update sun times based on coordinates"""
+        try:
+            # Temporarily update location to get sun times
+            current_location = settings['location'].copy()
+            settings['location'].update({
+                'latitude': float(lat),
+                'longitude': float(lon)
+            })
+            
+            sun_times = get_sun_times()
+            if sun_times:
+                sunrise = sun_times[0].strftime('%H:%M')
+                sunset = sun_times[1].strftime('%H:%M')
+                sunrise_entry.configure(state="normal")
+                sunrise_entry.delete(0, tk.END)
+                sunrise_entry.insert(0, sunrise)
+                sunrise_entry.configure(state="readonly")
+                sunset_entry.configure(state="normal")
+                sunset_entry.delete(0, tk.END)
+                sunset_entry.insert(0, sunset)
+                sunset_entry.configure(state="readonly")
+            
+            # Restore original location
+            settings['location'] = current_location
+        except Exception as e:
+            logging.error(f"Failed to update sun times: {e}")
+
+    def save_location(lat, lon):
+        """Save location and update settings"""
+        try:
+            settings['location'].update({
+                'latitude': float(lat),
+                'longitude': float(lon)
+            })
+            save_settings()
+            
+            # Update the schedule thread
+            update_schedule_thread()
+            
+            notify("Location Updated", 
+                  f"Location set to {settings['location']['latitude']}, {settings['location']['longitude']}")
+        except Exception as e:
+            notify("Error", f"Failed to save location: {str(e)}")
+
+    def validate_and_save_coordinate(value, coord_type):
+        """Validate coordinate input and save if valid"""
+        try:
+            float_val = float(value)
+            if coord_type == 'lat' and -90 <= float_val <= 90:
+                save_location(float_val, float(lon_entry.get()))
+                return True
+            elif coord_type == 'lon' and -180 <= float_val <= 180:
+                save_location(float(lat_entry.get()), float_val)
+                return True
+            return False
+        except ValueError:
+            return False
+
+    def on_schedule_toggle():
+        """Handle schedule toggle changes"""
+        settings['schedule_enabled'] = schedule_var.get()
+        save_settings()
+        update_schedule_thread()
+        notify("Schedule Updated", 
+              f"Sunset/Sunrise capture {'enabled' if settings['schedule_enabled'] else 'disabled'}")
+
+    def on_closing():
+        cleanup_map()
+        dialog.destroy()
+
     # Create the main window
     dialog = ctk.CTk()
     dialog.title("Set Location")
@@ -187,231 +263,182 @@ def set_location(icon, item):
     dialog.attributes('-topmost', True)
     dialog.lift()
     
-    dialog.grid_columnconfigure(0, weight=1)
-    dialog.grid_rowconfigure(0, weight=1)
-
-    # Main container
+    # Create main container with padding
     main_frame = ctk.CTkFrame(dialog)
-    main_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
-    main_frame.grid_columnconfigure(0, weight=1)
-    main_frame.grid_rowconfigure(1, weight=1)  # Make map row expandable
+    main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+    
+    # Create top frame for coordinates and sun times
+    settings_frame = ctk.CTkFrame(main_frame)
+    settings_frame.pack(fill="x", padx=5, pady=(0, 10))
+    
+    # Configure grid columns - two equal sections
+    settings_frame.grid_columnconfigure(1, weight=1)  # Entry column 1
+    settings_frame.grid_columnconfigure(3, weight=1)  # Entry column 2
+    
+    def validate_lat(event=None):
+        """Validate latitude input"""
+        value = lat_entry.get()
+        if not validate_and_save_coordinate(value, 'lat'):
+            lat_entry.delete(0, tk.END)
+            lat_entry.insert(0, str(settings['location']['latitude']))
 
-    # Location info at the top
-    loc_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-    loc_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
-    loc_frame.grid_columnconfigure(1, weight=1)
+    def validate_lon(event=None):
+        """Validate longitude input"""
+        value = lon_entry.get()
+        if not validate_and_save_coordinate(value, 'lon'):
+            lon_entry.delete(0, tk.END)
+            lon_entry.insert(0, str(settings['location']['longitude']))
     
-    # Location labels and entries
-    labels = ["Name:", "Region:", "Timezone:"]
-    entries = {}
+    # Create coordinate entries
+    lat_label = ctk.CTkLabel(settings_frame, text="Latitude:")
+    lat_label.grid(row=0, column=0, padx=5, pady=2, sticky="e")
+    lat_entry = ctk.CTkEntry(settings_frame, width=150)
+    lat_entry.grid(row=0, column=1, padx=5, pady=2, sticky="ew")
+    lat_entry.insert(0, str(settings['location']['latitude']))
+    lat_entry.bind('<FocusOut>', validate_lat)
+    lat_entry.bind('<Return>', validate_lat)
     
-    for i, label in enumerate(labels):
-        ctk.CTkLabel(loc_frame, text=label).grid(row=i, column=0, padx=(0, 5), pady=2, sticky="e")
-        entry = ctk.CTkEntry(loc_frame, width=200)
-        entry.grid(row=i, column=1, padx=(5, 0), pady=2, sticky="ew")
-        entries[label.lower().replace(":", "")] = entry
+    lon_label = ctk.CTkLabel(settings_frame, text="Longitude:")
+    lon_label.grid(row=1, column=0, padx=5, pady=2, sticky="e")
+    lon_entry = ctk.CTkEntry(settings_frame, width=150)
+    lon_entry.grid(row=1, column=1, padx=5, pady=2, sticky="ew")
+    lon_entry.insert(0, str(settings['location']['longitude']))
+    lon_entry.bind('<FocusOut>', validate_lon)
+    lon_entry.bind('<Return>', validate_lon)
     
-    # Fill current values
-    entries["name"].insert(0, settings['location']['name'])
-    entries["region"].insert(0, settings['location']['region'])
-    entries["timezone"].insert(0, settings['location']['timezone'])
+    # Add sun times display (read-only)
+    sunrise_label = ctk.CTkLabel(settings_frame, text="Sunrise:")
+    sunrise_label.grid(row=0, column=2, padx=5, pady=2, sticky="e")
+    sunrise_entry = ctk.CTkEntry(settings_frame, width=150)
+    sunrise_entry.configure(state="readonly")
+    sunrise_entry.grid(row=0, column=3, padx=5, pady=2, sticky="ew")
     
-    # Map container (to allow overlay)
-    map_container = ctk.CTkFrame(main_frame, fg_color="transparent")
-    map_container.grid(row=1, column=0, sticky="nsew")
-    map_container.grid_columnconfigure(0, weight=1)
-    map_container.grid_rowconfigure(0, weight=1)
+    sunset_label = ctk.CTkLabel(settings_frame, text="Sunset:")
+    sunset_label.grid(row=1, column=2, padx=5, pady=2, sticky="e")
+    sunset_entry = ctk.CTkEntry(settings_frame, width=150)
+    sunset_entry.configure(state="readonly")
+    sunset_entry.grid(row=1, column=3, padx=5, pady=2, sticky="ew")
     
-    # Map widget
-    map_widget = tkintermapview.TkinterMapView(map_container, width=400, height=300, corner_radius=0)
-    map_widget.grid(row=0, column=0, sticky="nsew")
+    # Initialize sun times
+    update_sun_times(settings['location']['latitude'], settings['location']['longitude'])
     
-    # Schedule toggle overlay (top-right of map)
-    schedule_frame = ctk.CTkFrame(map_container, fg_color=dialog._fg_color)
-    schedule_frame.grid(row=0, column=0, sticky="ne", padx=10, pady=10)
+    # Create map frame that will expand with window
+    map_frame = ctk.CTkFrame(main_frame)
+    map_frame.pack(fill="both", expand=True, padx=5, pady=5)
     
-    schedule_var = tk.BooleanVar(value=settings['schedule_enabled'])
-    schedule_label = ctk.CTkLabel(schedule_frame, text="Capture Only Sunsets/Sunrises")
-    schedule_label.pack(side="left", padx=(10, 5))
+    # Create map widget
+    map_widget = tkintermapview.TkinterMapView(map_frame, width=800, height=400, corner_radius=0)
+    map_widget.pack(fill="both", expand=True)
     
-    schedule_switch = ctk.CTkSwitch(schedule_frame, text="", variable=schedule_var, width=40)
-    schedule_switch.pack(side="left", padx=(0, 10))
+    # Add schedule toggle switch overlay on map
+    schedule_var = ctk.BooleanVar(value=settings['schedule_enabled'])
+    schedule_switch = ctk.CTkSwitch(
+        map_frame,
+        text="Capture Only Sunsets/Sunrises",
+        variable=schedule_var,
+        command=on_schedule_toggle,
+        width=200
+    )
+    schedule_switch.place(relx=1.0, y=10, anchor="ne", x=-10)
     
-    # Bottom frame for coordinates
-    bottom_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-    bottom_frame.grid(row=2, column=0, sticky="ew", pady=(10, 0))
-    bottom_frame.grid_columnconfigure(0, weight=1)
-    
-    # Coordinates
-    coord_frame = ctk.CTkFrame(bottom_frame, fg_color="transparent")
-    coord_frame.pack(fill="x")
-    coord_frame.grid_columnconfigure(1, weight=1)
-    coord_frame.grid_columnconfigure(3, weight=1)
-    
-    # Latitude
-    lat_label = ctk.CTkLabel(coord_frame, text="Latitude:")
-    lat_label.grid(row=0, column=0, padx=(0, 5), pady=2, sticky="e")
-    lat_var = tk.StringVar(value=f"{settings['location']['latitude']:.4f}")
-    lat_entry = ctk.CTkEntry(coord_frame, textvariable=lat_var, width=100)
-    lat_entry.grid(row=0, column=1, padx=(5, 10), pady=2, sticky="w")
-    
-    # Longitude
-    lon_label = ctk.CTkLabel(coord_frame, text="Longitude:")
-    lon_label.grid(row=0, column=2, padx=(10, 5), pady=2, sticky="e")
-    lon_var = tk.StringVar(value=f"{settings['location']['longitude']:.4f}")
-    lon_entry = ctk.CTkEntry(coord_frame, textvariable=lon_var, width=100)
-    lon_entry.grid(row=0, column=3, padx=(5, 0), pady=2, sticky="w")
-    
-    # Button frame
-    button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-    button_frame.grid(row=3, column=0, sticky="ew", pady=(10, 0))
-    button_frame.grid_columnconfigure(0, weight=1)
-    button_frame.grid_columnconfigure(1, weight=1)
-    
-    # Save and Cancel buttons
-    save_button = ctk.CTkButton(button_frame, text="Save", command=lambda: save(dialog, entries, lat_var, lon_var, schedule_var))
-    save_button.grid(row=0, column=0, padx=(10, 5), pady=15)
-    
-    cancel_button = ctk.CTkButton(button_frame, text="Cancel", command=lambda: cancel(dialog))
-    cancel_button.grid(row=0, column=1, padx=(5, 10), pady=15)
+    # Set initial map position and marker
+    if settings['location']['latitude'] != 0 or settings['location']['longitude'] != 0:
+        lat = settings['location']['latitude']
+        lon = settings['location']['longitude']
+        map_widget.set_position(lat, lon)
+        map_widget.set_zoom(12)
+        map_widget.set_marker(lat, lon)
+    else:
+        map_widget.set_zoom(8)
     
     def on_map_click(coords):
         lat, lon = coords
-        lat_var.set(f"{lat:.4f}")
-        lon_var.set(f"{lon:.4f}")
+        lat_entry.delete(0, tk.END)
+        lat_entry.insert(0, str(lat))
+        lon_entry.delete(0, tk.END)
+        lon_entry.insert(0, str(lon))
+        
+        # Add marker at clicked position
         map_widget.delete_all_marker()
         map_widget.set_marker(lat, lon)
+        
+        # Update sun times for new location
+        update_sun_times(lat, lon)
+        
+        # Save location immediately
+        save_location(lat, lon)
     
     map_widget.add_left_click_map_command(on_map_click)
-    
-    def cleanup_map():
-        """Clean up map widget and cancel any pending after events"""
-        # Cancel all pending after events
-        for widget in map_widget.winfo_children():
-            widget.after_cancel()
-        map_widget.after_cancel()
-        # Destroy the widget
-        map_widget.destroy()
-
-    def save(dialog, entries, lat_var, lon_var, schedule_var):
-        try:
-            settings['location'].update({
-                'name': entries["name"].get().strip(),
-                'region': entries["region"].get().strip(),
-                'timezone': entries["timezone"].get().strip(),
-                'latitude': float(lat_var.get()),
-                'longitude': float(lon_var.get())
-            })
-            settings['schedule_enabled'] = schedule_var.get()
-            save_settings()
-            
-            # Update the schedule thread
-            update_schedule_thread()
-            
-            notify("Location Updated", 
-                  f"Location set to {settings['location']['name']}, {settings['location']['region']}\n"
-                  f"Schedule {'enabled' if settings['schedule_enabled'] else 'disabled'}")
-            
-            # Clean up map widget before destroying
-            cleanup_map()
-            dialog.destroy()
-        except Exception as e:
-            notify("Error", f"Failed to save location: {str(e)}")
-    
-    def cancel(dialog):
-        # Clean up map widget before destroying
-        cleanup_map()
-        dialog.destroy()
-    
-    def on_closing():
-        # Clean up map widget before destroying
-        cleanup_map()
-        dialog.destroy()
     
     # Bind window close button
     dialog.protocol("WM_DELETE_WINDOW", on_closing)
     
     dialog.mainloop()
 
-def create_menu(icon=None):
-    """Create the system tray menu."""
-    logging.info("[create_menu] Creating system tray menu")
-    logging.info(f"[create_menu] Current settings - Interval: {settings['interval']}s, Paused: {settings['is_paused']}")
-
-    # Create menu items
-    menu_items = [
-        MenuItem("⏸ Pause" if not settings['is_paused'] else "▶ Resume", toggle_pause),
-        MenuItem("Set YouTube URL", set_youtube_url),
-        MenuItem("Screenshot Interval", get_interval_menu()),
-        MenuItem("Set Location", set_location),
-        MenuItem("Set Output Path", select_output_path),
-        MenuItem("Exit", quit_program)
-    ]
-    
-    menu = Menu(*menu_items)
-    
-    # If icon exists, update its menu, otherwise return the new menu
-    if icon:
-        icon.menu = menu
-    return menu
-
-def should_capture_now():
-    """Check if we should capture based on schedule."""
-    if not settings['schedule_enabled']:
-        return True
-        
-    try:
-        sunrise, sunset = get_sun_times()
-        now = datetime.now(sunrise.tzinfo)
-        
-        # Capture window is 30 minutes before and after sunrise/sunset
-        sunrise_start = sunrise - timedelta(minutes=30)
-        sunrise_end = sunrise + timedelta(minutes=30)
-        sunset_start = sunset - timedelta(minutes=30)
-        sunset_end = sunset + timedelta(minutes=30)
-        
-        in_window = (sunrise_start <= now <= sunrise_end) or (sunset_start <= now <= sunset_end)
-        if in_window:
-            logging.info(f"In capture window: {now}")
-        return in_window
-    except Exception as e:
-        logging.error(f"Error checking schedule: {e}")
-        return True
-
 def update_schedule_thread():
     """Update the schedule thread based on current settings."""
     global schedule_thread
-    if hasattr(update_schedule_thread, 'schedule_thread') and schedule_thread.is_alive():
-        schedule_thread.stop()
-    schedule_thread = threading.Thread(target=schedule_screenshots, daemon=True)
-    schedule_thread.start()
+    
+    # Stop existing thread if running
+    if schedule_thread and schedule_thread.is_alive():
+        schedule_thread = None
+    
+    # Start new thread if scheduling is enabled
+    if settings['schedule_enabled']:
+        schedule_thread = threading.Thread(target=schedule_screenshots, daemon=True)
+        schedule_thread.start()
+        
+        # Force immediate schedule update
+        sunrise, sunset = get_sun_times()
+        now = datetime.now(sunrise.tzinfo)
+        if now < sunrise - timedelta(minutes=30):
+            next_window = sunrise - timedelta(minutes=30)
+            window_type = "sunrise"
+        elif now < sunset - timedelta(minutes=30):
+            next_window = sunset - timedelta(minutes=30)
+            window_type = "sunset"
+        else:
+            tomorrow = now.date() + timedelta(days=1)
+            next_sunrise = sun(get_location_info().observer, date=tomorrow)['sunrise']
+            next_window = next_sunrise - timedelta(minutes=30)
+            window_type = "tomorrow's sunrise"
+        
+        time_until = next_window - now
+        logging.info(f"Next capture window: {window_type} at {next_window} (in {time_until})")
 
 def schedule_screenshots():
     """Monitor schedule and log next capture windows."""
+    last_date = None
     while True:
         try:
             if settings['schedule_enabled']:
                 sunrise, sunset = get_sun_times()
                 now = datetime.now(sunrise.tzinfo)
+                current_date = now.date()
                 
-                # Calculate next capture window
-                if now < sunrise - timedelta(minutes=30):
-                    next_window = sunrise - timedelta(minutes=30)
-                    window_type = "sunrise"
-                elif now < sunset - timedelta(minutes=30):
-                    next_window = sunset - timedelta(minutes=30)
-                    window_type = "sunset"
-                else:
-                    # Wait for tomorrow's sunrise
-                    tomorrow = now.date() + timedelta(days=1)
-                    next_sunrise = sun(get_location_info().observer, date=tomorrow)['sunrise']
-                    next_window = next_sunrise - timedelta(minutes=30)
-                    window_type = "tomorrow's sunrise"
-                
-                time_until = next_window - now
-                logging.info(f"Next capture window: {window_type} at {next_window} (in {time_until})")
+                # Only update if it's a new day
+                if current_date != last_date:
+                    if now < sunrise - timedelta(minutes=30):
+                        next_window = sunrise - timedelta(minutes=30)
+                        window_type = "sunrise"
+                    elif now < sunset - timedelta(minutes=30):
+                        next_window = sunset - timedelta(minutes=30)
+                        window_type = "sunset"
+                    else:
+                        # Wait for tomorrow's sunrise
+                        tomorrow = now.date() + timedelta(days=1)
+                        next_sunrise = sun(get_location_info().observer, date=tomorrow)['sunrise']
+                        next_window = next_sunrise - timedelta(minutes=30)
+                        window_type = "tomorrow's sunrise"
+                    
+                    time_until = next_window - now
+                    logging.info(f"Next capture window: {window_type} at {next_window} (in {time_until})")
+                    last_date = current_date
             
-            time.sleep(60)  # Update schedule info every minute
+            # Sleep until next minute
+            now = datetime.now()
+            sleep_seconds = 60 - now.second
+            time.sleep(sleep_seconds)
             
         except Exception as e:
             logging.error(f"Error in schedule thread: {e}")
@@ -454,18 +481,24 @@ def capture_screenshot():
         try:
             logging.info("Using yt-dlp to get video info...")
             ydl_opts = {
-                'format': 'best[ext=mp4]',
                 'quiet': True,
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(settings['youtube_url'], download=False)
-                stream_url = info['url']
+                # Get best matching format based on preferred resolution
+                best_format = get_best_matching_format(info['formats'], settings['preferred_resolution'])
+                if not best_format:
+                    raise Exception("No suitable video format found")
+                
+                stream_url = best_format['url']
                 video_title = info.get('title', 'untitled')
+                actual_height = best_format.get('height', 'unknown')
                 logging.info(f"Video title: {video_title}")
+                logging.info(f"Selected resolution: {actual_height}p")
                 logging.info("Successfully got stream URL")
 
-            # Create filename with date and cleaned title
-            timestamp = datetime.now().strftime("%Y_%m_%d")
+            # Create filename with full timestamp and cleaned title
+            timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
             cleaned_title = clean_filename(video_title)
             output_file = os.path.join(settings['output_path'], f"{timestamp}_{cleaned_title}.jpg")
             logging.info(f"Output file will be: {output_file}")
@@ -586,6 +619,57 @@ def select_output_path(icon, item):
         os.makedirs(settings['output_path'], exist_ok=True)
         notify("Settings Updated", f"New screenshot directory: {new_path}")
 
+def create_menu(icon=None):
+    """Create the system tray menu."""
+    logging.info("[create_menu] Creating system tray menu")
+    logging.info(f"[create_menu] Current settings - Interval: {settings['interval']}s, Paused: {settings['is_paused']}")
+
+    # Create settings submenu
+    settings_menu = Menu(
+        MenuItem("Set YouTube URL", set_youtube_url),
+        MenuItem("Set Output Path", select_output_path),
+        MenuItem("Set Location", set_location),
+        MenuItem("Set Interval", get_interval_menu()),
+        MenuItem("Set Resolution", get_resolution_menu())
+    )
+
+    # Create main menu items
+    menu_items = [
+        MenuItem("⬛ Pause" if not settings['is_paused'] else "▶ Resume", toggle_pause),
+        MenuItem("Settings", settings_menu),
+        MenuItem("Exit", quit_program)
+    ]
+    
+    menu = Menu(*menu_items)
+    
+    # If icon exists, update its menu, otherwise return the new menu
+    if icon:
+        icon.menu = menu
+    return menu
+
+def should_capture_now():
+    """Check if we should capture based on schedule."""
+    if not settings['schedule_enabled']:
+        return True
+        
+    try:
+        sunrise, sunset = get_sun_times()
+        now = datetime.now(sunrise.tzinfo)
+        
+        # Capture window is 30 minutes before and after sunrise/sunset
+        sunrise_start = sunrise - timedelta(minutes=30)
+        sunrise_end = sunrise + timedelta(minutes=30)
+        sunset_start = sunset - timedelta(minutes=30)
+        sunset_end = sunset + timedelta(minutes=30)
+        
+        in_window = (sunrise_start <= now <= sunrise_end) or (sunset_start <= now <= sunset_end)
+        if in_window:
+            logging.info(f"In capture window: {now}")
+        return in_window
+    except Exception as e:
+        logging.error(f"Error checking schedule: {e}")
+        return True
+
 def create_menu_item(text, interval):
     """Create a menu item for a specific interval."""
     def set_interval(icon, item):
@@ -606,6 +690,67 @@ def get_interval_menu():
     logging.info(f"Available intervals: {[i[1] for i in intervals]} seconds")
     menu_items = [create_menu_item(text, secs) for text, secs in intervals]
     return Menu(*menu_items)
+
+def create_resolution_menu_item(text, resolution):
+    """Create a menu item for a specific resolution."""
+    def set_resolution(icon, item):
+        old_resolution = settings['preferred_resolution']
+        settings['preferred_resolution'] = resolution
+        save_settings()
+        logging.info(f"Changed resolution from {old_resolution} to {resolution}")
+        notify("Resolution Changed", f"Screenshot resolution set to {resolution}")
+        # Update menu to show new checked state
+        create_menu(icon)
+    return MenuItem(text, set_resolution, checked=lambda item: settings['preferred_resolution'] == resolution)
+
+def get_resolution_menu():
+    """Create a submenu for resolution options."""
+    logging.info("Creating resolution submenu")
+    # Common YouTube resolutions
+    resolutions = [
+        ("4K (2160p)", "2160p"),
+        ("1440p", "1440p"),
+        ("1080p", "1080p"),
+        ("720p", "720p"),
+        ("480p", "480p"),
+        ("360p", "360p")
+    ]
+    logging.info(f"Available resolutions: {[r[1] for r in resolutions]}")
+    menu_items = [create_resolution_menu_item(text, res) for text, res in resolutions]
+    return Menu(*menu_items)
+
+def get_best_matching_format(formats, preferred_resolution):
+    """Find the best matching format for the preferred resolution."""
+    # Extract height from preferred resolution (e.g., '1080p' -> 1080)
+    target_height = int(preferred_resolution.replace('p', ''))
+    
+    # Filter for mp4 formats with both video and audio
+    valid_formats = [
+        f for f in formats 
+        if f.get('ext') == 'mp4' and 
+        f.get('acodec') != 'none' and 
+        f.get('vcodec') != 'none'
+    ]
+    
+    if not valid_formats:
+        logging.warning("No valid mp4 formats found, falling back to any format")
+        valid_formats = formats
+    
+    # Sort formats by how close they are to the target resolution
+    valid_formats.sort(
+        key=lambda f: (
+            abs(f.get('height', 0) - target_height),  # Distance from target height
+            -f.get('height', 0),  # Prefer higher resolution if same distance
+            -f.get('filesize', 0)  # Prefer larger filesize if same height
+        )
+    )
+    
+    best_format = valid_formats[0] if valid_formats else None
+    if best_format:
+        actual_height = best_format.get('height', 'unknown')
+        logging.info(f"Selected format: {actual_height}p (wanted {preferred_resolution})")
+    
+    return best_format
 
 def toggle_pause(icon, item):
     """Toggle the pause state."""
