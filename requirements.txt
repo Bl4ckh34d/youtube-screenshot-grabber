@@ -1,6 +1,10 @@
-astral
-plyer
 pystray
 Pillow
+plyer
+astral
 yt-dlp
 customtkinter
+tkintermapview
+requests
+tzlocal
+timezonefinder
