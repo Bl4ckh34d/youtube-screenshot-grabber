@@ -17,6 +17,7 @@ import customtkinter as ctk
 import tkintermapview
 import json
 import re
+import cv2
 
 # Set up logging first
 logging.basicConfig(
@@ -81,7 +82,7 @@ def get_windows_location():
         
         # Get timezone
         import tzlocal
-        timezone = str(tzlocal.get_localzone())
+        timezone = str(tzlocal.get_localzone()).replace('#', '')  # Normalize timezone string
         logging.info(f"Local timezone: {timezone}")
         
         # Use IP-based geolocation
@@ -106,7 +107,7 @@ def get_windows_location():
                         return {
                             'name': data.get('city', 'Unknown'),
                             'region': data.get('country', 'Unknown'),
-                            'timezone': timezone,
+                            'timezone': timezone,  # Use normalized timezone
                             'latitude': float(data.get('lat', 0)),
                             'longitude': float(data.get('lon', 0))
                         }
@@ -115,7 +116,7 @@ def get_windows_location():
                         return {
                             'name': data.get('city', 'Unknown'),
                             'region': data.get('country_name', 'Unknown'),
-                            'timezone': timezone,
+                            'timezone': timezone,  # Use normalized timezone
                             'latitude': float(data.get('latitude', 0)),
                             'longitude': float(data.get('longitude', 0))
                         }
@@ -159,24 +160,76 @@ def save_settings():
 # Initialize settings
 settings = load_settings()
 
+# Create hidden root window for dialogs
+root = tk.Tk()
+root.withdraw()  # Hide the root window
+root.attributes('-alpha', 0)  # Make it fully transparent
+
 def get_location_info():
     """Get LocationInfo object from current settings."""
-    loc = settings['location']
-    return LocationInfo(loc['name'], loc['region'], loc['timezone'], 
-                       loc['latitude'], loc['longitude'])
+    # Normalize timezone string and ensure it's not empty
+    timezone = settings['location']['timezone'].replace('#', '')
+    if not timezone:
+        # Fallback to system timezone
+        import tzlocal
+        timezone = str(tzlocal.get_localzone()).replace('#', '')
+        # Update settings with the fallback timezone
+        settings['location']['timezone'] = timezone
+        save_settings()
+        logging.info(f"Using fallback timezone: {timezone}")
+    
+    return LocationInfo(
+        name=settings['location']['name'],
+        region=settings['location']['region'],
+        timezone=timezone,
+        latitude=settings['location']['latitude'],
+        longitude=settings['location']['longitude']
+    )
 
 def get_sun_times():
     """Get sunrise and sunset times for the current location."""
     location = get_location_info()
-    s = sun(location.observer, date=datetime.now(ZoneInfo(location['timezone'])))
-    return s['sunrise'], s['sunset']
+    try:
+        s = sun(location.observer, date=datetime.now(ZoneInfo(location.timezone)).date())
+        return s['sunrise'], s['sunset']
+    except Exception as e:
+        logging.error(f"Error getting sun times: {e}")
+        # Return None values to indicate error
+        return None, None
 
 def set_location(icon, item):
     """Open dialog to set location."""
-    def cleanup_map():
-        """Clean up map widget"""
-        map_widget.destroy()
-
+    dialog = ctk.CTkToplevel(root)  # Use root as parent
+    dialog.title("Set Location")
+    dialog.geometry("1000x600")
+    dialog.grab_set()  # Make the dialog modal
+    
+    # Create main frame
+    main_frame = ctk.CTkFrame(dialog)
+    main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+    
+    # Create settings frame
+    settings_frame = ctk.CTkFrame(main_frame)
+    settings_frame.pack(fill="x", padx=5, pady=5)
+    
+    def on_closing():
+        """Handle window closing"""
+        try:
+            # Remove all map widget callbacks
+            if hasattr(map_widget, '_click_commands'):
+                map_widget._click_commands = []
+            map_widget.delete_all_marker()
+        except Exception:
+            pass
+        dialog.grab_release()
+        dialog.after(100, dialog.destroy)  # Delay destruction to allow cleanup
+    
+    def on_schedule_toggle():
+        """Handle schedule toggle"""
+        settings['schedule_enabled'] = schedule_var.get()
+        save_settings()
+        update_schedule_thread()
+    
     def update_sun_times(lat, lon):
         """Update sun times based on coordinates"""
         try:
@@ -188,7 +241,7 @@ def set_location(icon, item):
             })
             
             sun_times = get_sun_times()
-            if sun_times:
+            if sun_times and all(sun_times):  # Check that neither sunrise nor sunset is None
                 sunrise = sun_times[0].strftime('%H:%M')
                 sunset = sun_times[1].strftime('%H:%M')
                 sunrise_entry.configure(state="normal")
@@ -232,50 +285,14 @@ def set_location(icon, item):
             elif coord_type == 'lon' and -180 <= float_val <= 180:
                 save_location(float(lat_entry.get()), float_val)
                 return True
-            return False
+            else:
+                notify("Invalid Input", 
+                      "Latitude must be between -90 and 90\nLongitude must be between -180 and 180")
+                return False
         except ValueError:
+            notify("Invalid Input", "Please enter a valid number")
             return False
 
-    def on_schedule_toggle():
-        """Handle schedule toggle changes"""
-        settings['schedule_enabled'] = schedule_var.get()
-        save_settings()
-        update_schedule_thread()
-        notify("Schedule Updated", 
-              f"Sunset/Sunrise capture {'enabled' if settings['schedule_enabled'] else 'disabled'}")
-
-    def on_closing():
-        cleanup_map()
-        dialog.destroy()
-
-    # Create the main window
-    dialog = ctk.CTk()
-    dialog.title("Set Location")
-    dialog.geometry("800x600")
-    
-    # Center the window
-    screen_width = dialog.winfo_screenwidth()
-    screen_height = dialog.winfo_screenheight()
-    x = (screen_width - 800) // 2
-    y = (screen_height - 600) // 2
-    dialog.geometry(f"800x600+{x}+{y}")
-    
-    # Make window stay on top
-    dialog.attributes('-topmost', True)
-    dialog.lift()
-    
-    # Create main container with padding
-    main_frame = ctk.CTkFrame(dialog)
-    main_frame.pack(fill="both", expand=True, padx=10, pady=10)
-    
-    # Create top frame for coordinates and sun times
-    settings_frame = ctk.CTkFrame(main_frame)
-    settings_frame.pack(fill="x", padx=5, pady=(0, 10))
-    
-    # Configure grid columns - two equal sections
-    settings_frame.grid_columnconfigure(1, weight=1)  # Entry column 1
-    settings_frame.grid_columnconfigure(3, weight=1)  # Entry column 2
-    
     def validate_lat(event=None):
         """Validate latitude input"""
         value = lat_entry.get()
@@ -327,7 +344,7 @@ def set_location(icon, item):
     map_frame = ctk.CTkFrame(main_frame)
     map_frame.pack(fill="both", expand=True, padx=5, pady=5)
     
-    # Create map widget
+    # Create map widget with a reference we keep
     map_widget = tkintermapview.TkinterMapView(map_frame, width=800, height=400, corner_radius=0)
     map_widget.pack(fill="both", expand=True)
     
@@ -371,10 +388,11 @@ def set_location(icon, item):
     
     map_widget.add_left_click_map_command(on_map_click)
     
-    # Bind window close button
+    # Bind window close button and cleanup
     dialog.protocol("WM_DELETE_WINDOW", on_closing)
     
-    dialog.mainloop()
+    # Start the dialog
+    dialog.wait_window()
 
 def update_schedule_thread():
     """Update the schedule thread based on current settings."""
@@ -438,9 +456,8 @@ def schedule_screenshots():
                     logging.info(f"Next capture window: {window_type} at {next_window} (in {time_until})")
                     last_date = current_date
             
-            # Sleep for 15 minutes - sunrise/sunset times change very slowly
-            # and we only need this to track daily changes
-            time.sleep(60 * 60 * 12)
+            # Sleep for 3 hours
+            time.sleep(60 * 60 * 3)
             
         except Exception as e:
             logging.error(f"Error in schedule thread: {e}")
@@ -492,6 +509,7 @@ def capture_screenshot():
                 if not best_format:
                     raise Exception("No suitable video format found")
                 
+                # Get stream URL
                 stream_url = best_format['url']
                 video_title = info.get('title', 'untitled')
                 actual_height = best_format.get('height', 'unknown')
@@ -517,6 +535,7 @@ def capture_screenshot():
                 "ffmpeg", "-y", "-i", stream_url,
                 "-vframes", "1",
                 "-q:v", "2",
+                "-vf", f"scale={best_format['width']}:{best_format['height']}:force_original_aspect_ratio=decrease",
                 output_file
             ]
             subprocess.run(ffmpeg_cmd, capture_output=True, check=True, startupinfo=startupinfo)
@@ -545,78 +564,78 @@ def capture_screenshot():
 
 def set_youtube_url(icon, item):
     """Open dialog to set YouTube URL."""
-    # Create the main window
-    dialog = ctk.CTk()
-    dialog.title("Set YouTube URL")
-    dialog.geometry("400x60")  
-    
-    # Center the window
-    screen_width = dialog.winfo_screenwidth()
-    screen_height = dialog.winfo_screenheight()
-    x = (screen_width - 400) // 2
-    y = (screen_height - 60) // 2
-    dialog.geometry(f"400x60+{x}+{y}")
-    
-    # Make window stay on top
-    dialog.attributes('-topmost', True)
-    dialog.lift()
-    
-    # Create a frame for content with minimal padding
-    content_frame = ctk.CTkFrame(dialog, corner_radius=8)
-    content_frame.pack(fill="both", expand=True, padx=8, pady=8)
-    
-    # Create a frame for URL entry and save button
-    url_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
-    url_frame.pack(expand=True)
-    
+    def on_closing():
+        dialog.grab_release()
+        dialog.destroy()
+
     def save_url():
         url = url_entry.get().strip()
-        if url:
-            settings['youtube_url'] = url
-            settings['is_paused'] = False  # Auto-unpause when URL is set
-            save_settings()
-            notify("YouTube URL", "URL saved successfully. Screenshot capture resumed.")
-            icon.menu = create_menu(icon)  # Update menu to show Pause option
-            dialog.destroy()
-        else:
-            notify("YouTube URL", "Please enter a valid URL")
+        if not url:
+            notify("Error", "Please enter a URL")
+            return
+        
+        try:
+            # Test URL format using yt-dlp
+            with yt_dlp.YoutubeDL() as ydl:
+                info = ydl.extract_info(url, download=False)
+                if not info:
+                    raise ValueError("Could not extract video information")
+                
+                # Get available formats
+                formats = info.get('formats', [])
+                if not formats:
+                    raise ValueError("No video formats available")
+                
+                # Find best format matching preferred resolution
+                best_format = get_best_matching_format(formats, settings['preferred_resolution'])
+                if not best_format:
+                    raise ValueError(f"No suitable format found for {settings['preferred_resolution']}")
+                
+                # Update settings
+                settings['youtube_url'] = url
+                save_settings()
+                
+                notify("URL Updated", f"YouTube URL set to: {url}")
+                on_closing()
+                
+        except Exception as e:
+            notify("Error", f"Invalid YouTube URL: {str(e)}")
+            return
+
+    # Create the dialog window
+    dialog = ctk.CTkToplevel(root)  # Use root as parent
+    dialog.title("Set YouTube URL")
+    dialog.geometry("380x110")
+    dialog.grab_set()  # Make the dialog modal
     
-    # Add URL entry
-    url_entry = ctk.CTkEntry(
-        url_frame,
-        width=280,
-        height=30,
-        placeholder_text="Enter YouTube URL here..."
-    )
-    url_entry.pack(side="left", padx=(0, 5))
+    # Create main frame with padding
+    main_frame = ctk.CTkFrame(dialog)
+    main_frame.pack(fill="both", expand=True, padx=10, pady=5)
+    
+    # URL entry
+    url_label = ctk.CTkLabel(main_frame, text="YouTube URL:")
+    url_label.pack(pady=(0, 2))
+    url_entry = ctk.CTkEntry(main_frame, width=350)
+    url_entry.pack(pady=(0, 5))
     if settings['youtube_url']:
         url_entry.insert(0, settings['youtube_url'])
     
-    # Add save button next to entry
-    save_button = ctk.CTkButton(
-        url_frame,
-        text="Save",
-        width=60,
-        height=30,
-        command=save_url
-    )
-    save_button.pack(side="left")
+    # Save button
+    save_button = ctk.CTkButton(main_frame, text="Save", command=save_url, width=100)
+    save_button.pack(pady=2)
     
-    # Bind Enter key to save
-    dialog.bind('<Return>', lambda e: save_url())
+    # Bind enter key to save
+    url_entry.bind('<Return>', lambda e: save_url())
     
-    # Focus the entry
-    url_entry.focus()
+    # Bind window close button
+    dialog.protocol("WM_DELETE_WINDOW", on_closing)
     
-    dialog.mainloop()
+    # Start the dialog
+    dialog.wait_window()
 
 def select_output_path(icon, item):
     """Open a directory selection dialog."""
     # Create a hidden root window for the dialog
-    root = tk.Tk()
-    root.withdraw()
-    
-    # Open directory selection dialog
     new_path = filedialog.askdirectory(
         title="Select Screenshot Directory",
         initialdir=settings['output_path']
@@ -638,7 +657,8 @@ def create_menu(icon=None):
         MenuItem("Set Output Path", select_output_path),
         MenuItem("Set Location", set_location),
         MenuItem("Set Interval", get_interval_menu()),
-        MenuItem("Set Resolution", get_resolution_menu())
+        MenuItem("Set Resolution", get_resolution_menu()),
+        MenuItem("Set Time Window", get_time_window_menu())
     )
 
     # Create main menu items
@@ -727,6 +747,29 @@ def get_resolution_menu():
     logging.info(f"Available resolutions: {[r[1] for r in resolutions]}")
     menu_items = [create_resolution_menu_item(text, res) for text, res in resolutions]
     return Menu(*menu_items)
+
+def create_time_window_menu_item(text, minutes):
+    """Create a menu item for a specific time window duration."""
+    def set_time_window(icon, item):
+        old_window = settings['capture_window_minutes']
+        settings['capture_window_minutes'] = minutes
+        save_settings()
+        logging.info(f"Changed capture window from {old_window} to {minutes} minutes")
+        notify("Time Window Changed", f"Capture window set to {minutes} minutes before/after sunrise/sunset")
+        # Update menu to show new checked state
+        create_menu(icon)
+    return MenuItem(text, set_time_window, checked=lambda item: settings['capture_window_minutes'] == minutes)
+
+def get_time_window_menu():
+    """Create a submenu for time window options."""
+    return Menu(
+        create_time_window_menu_item("15 minutes", 15),
+        create_time_window_menu_item("30 minutes", 30),
+        create_time_window_menu_item("45 minutes", 45),
+        create_time_window_menu_item("60 minutes", 60),
+        create_time_window_menu_item("75 minutes", 75),
+        create_time_window_menu_item("90 minutes", 90)
+    )
 
 def get_best_matching_format(formats, preferred_resolution):
     """Find the best matching format for the preferred resolution."""
@@ -872,7 +915,30 @@ def run_app():
     schedule_thread.start()
     
     logging.info("Application ready")
-    icon.run()
+    
+    # Initialize settings
+    if windows_location:
+        settings['location'] = windows_location
+        save_settings()
+    
+    try:
+        # Start the schedule thread if needed
+        if settings['schedule_enabled']:
+            update_schedule_thread()
+        
+        # Run the icon's event loop
+        icon.run()
+    except Exception as e:
+        logging.error(f"Error running app: {e}")
+        raise
+    finally:
+        # Clean up any remaining customtkinter windows
+        for window in ctk.CTk.get_instances():
+            try:
+                window.quit()
+                window.destroy()
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     try:
