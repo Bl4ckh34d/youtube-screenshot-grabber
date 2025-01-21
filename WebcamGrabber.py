@@ -48,6 +48,7 @@ DEFAULT_SETTINGS = {
     'is_paused': True,  # Start paused until URL is set
     'schedule_enabled': False,
     'preferred_resolution': '1080p',  # Default to 1080p
+    'capture_window_minutes': 30,  # Minutes before and after sunrise/sunset
     'location': {
         'name': "",
         'region': "",
@@ -391,16 +392,17 @@ def update_schedule_thread():
         # Force immediate schedule update
         sunrise, sunset = get_sun_times()
         now = datetime.now(sunrise.tzinfo)
-        if now < sunrise - timedelta(minutes=30):
-            next_window = sunrise - timedelta(minutes=30)
+        window_minutes = settings['capture_window_minutes']
+        if now < sunrise - timedelta(minutes=window_minutes):
+            next_window = sunrise - timedelta(minutes=window_minutes)
             window_type = "sunrise"
-        elif now < sunset - timedelta(minutes=30):
-            next_window = sunset - timedelta(minutes=30)
+        elif now < sunset - timedelta(minutes=window_minutes):
+            next_window = sunset - timedelta(minutes=window_minutes)
             window_type = "sunset"
         else:
             tomorrow = now.date() + timedelta(days=1)
             next_sunrise = sun(get_location_info().observer, date=tomorrow)['sunrise']
-            next_window = next_sunrise - timedelta(minutes=30)
+            next_window = next_sunrise - timedelta(minutes=window_minutes)
             window_type = "tomorrow's sunrise"
         
         time_until = next_window - now
@@ -418,31 +420,31 @@ def schedule_screenshots():
                 
                 # Only update if it's a new day
                 if current_date != last_date:
-                    if now < sunrise - timedelta(minutes=30):
-                        next_window = sunrise - timedelta(minutes=30)
+                    window_minutes = settings['capture_window_minutes']
+                    if now < sunrise - timedelta(minutes=window_minutes):
+                        next_window = sunrise - timedelta(minutes=window_minutes)
                         window_type = "sunrise"
-                    elif now < sunset - timedelta(minutes=30):
-                        next_window = sunset - timedelta(minutes=30)
+                    elif now < sunset - timedelta(minutes=window_minutes):
+                        next_window = sunset - timedelta(minutes=window_minutes)
                         window_type = "sunset"
                     else:
                         # Wait for tomorrow's sunrise
                         tomorrow = now.date() + timedelta(days=1)
                         next_sunrise = sun(get_location_info().observer, date=tomorrow)['sunrise']
-                        next_window = next_sunrise - timedelta(minutes=30)
+                        next_window = next_sunrise - timedelta(minutes=window_minutes)
                         window_type = "tomorrow's sunrise"
                     
                     time_until = next_window - now
                     logging.info(f"Next capture window: {window_type} at {next_window} (in {time_until})")
                     last_date = current_date
             
-            # Sleep until next minute
-            now = datetime.now()
-            sleep_seconds = 60 - now.second
-            time.sleep(sleep_seconds)
+            # Sleep for 15 minutes - sunrise/sunset times change very slowly
+            # and we only need this to track daily changes
+            time.sleep(60 * 60 * 12)
             
         except Exception as e:
             logging.error(f"Error in schedule thread: {e}")
-            time.sleep(60)
+            time.sleep(60)  # On error, retry after a minute
 
 def test_screenshots():
     """Take screenshots at regular intervals."""
@@ -662,11 +664,12 @@ def should_capture_now():
         sunrise, sunset = get_sun_times()
         now = datetime.now(sunrise.tzinfo)
         
-        # Capture window is 30 minutes before and after sunrise/sunset
-        sunrise_start = sunrise - timedelta(minutes=30)
-        sunrise_end = sunrise + timedelta(minutes=30)
-        sunset_start = sunset - timedelta(minutes=30)
-        sunset_end = sunset + timedelta(minutes=30)
+        # Capture window is configurable minutes before and after sunrise/sunset
+        window_minutes = settings['capture_window_minutes']
+        sunrise_start = sunrise - timedelta(minutes=window_minutes)
+        sunrise_end = sunrise + timedelta(minutes=window_minutes)
+        sunset_start = sunset - timedelta(minutes=window_minutes)
+        sunset_end = sunset + timedelta(minutes=window_minutes)
         
         in_window = (sunrise_start <= now <= sunrise_end) or (sunset_start <= now <= sunset_end)
         if in_window:
