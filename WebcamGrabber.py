@@ -714,8 +714,9 @@ def create_menu_item(text, interval):
 def get_interval_menu():
     """Create a submenu for interval options."""
     logging.info("Creating interval submenu")
-    # Create intervals from 5 to 60 seconds in 5-second increments
-    intervals = [(f"{secs} seconds", secs) for secs in range(5, 61, 5)]
+    # Create intervals from 1 to 60 seconds
+    intervals = [(f"{secs} second{'s' if secs != 1 else ''}", secs) for secs in range(1, 5)]  # 1-4 seconds
+    intervals.extend([(f"{secs} seconds", secs) for secs in range(5, 61, 5)])  # 5-60 seconds in 5s increments
     logging.info(f"Available intervals: {[i[1] for i in intervals]} seconds")
     menu_items = [create_menu_item(text, secs) for text, secs in intervals]
     return Menu(*menu_items)
