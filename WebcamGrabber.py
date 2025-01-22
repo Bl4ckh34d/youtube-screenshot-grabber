@@ -59,6 +59,14 @@ DEFAULT_SETTINGS = {
     }
 }
 
+stream_info_cache = {
+    'url': None,
+    'stream_url': None,
+    'title': None,
+    'format': None,
+    'last_updated': None
+}
+
 def get_windows_location():
     """Get the user's location from Windows settings."""
     logging.info("Attempting to get Windows location...")
@@ -486,6 +494,54 @@ def test_screenshots():
             logging.error(f"Error in screenshot thread: {str(e)}")
             time.sleep(settings['interval'])
 
+def get_stream_info():
+    """Get stream information, using cache if available and not expired."""
+    global stream_info_cache
+    
+    current_url = settings['youtube_url']
+    current_time = datetime.now()
+    
+    # If URL changed or cache expired (after 1 hour), refresh cache
+    cache_valid = (
+        stream_info_cache['url'] == current_url and
+        stream_info_cache['last_updated'] and
+        (current_time - stream_info_cache['last_updated']).total_seconds() < 3600
+    )
+    
+    if not cache_valid:
+        logging.info("Fetching fresh stream info...")
+        try:
+            with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+                info = ydl.extract_info(current_url, download=False)
+                best_format = get_best_matching_format(info['formats'], settings['preferred_resolution'])
+                
+                if not best_format:
+                    raise Exception("No suitable video format found")
+                
+                # Update cache
+                stream_info_cache.update({
+                    'url': current_url,
+                    'stream_url': best_format['url'],
+                    'title': info.get('title', 'untitled'),
+                    'format': best_format,
+                    'last_updated': current_time
+                })
+                
+                actual_height = best_format.get('height', 'unknown')
+                logging.info(f"Selected format: {actual_height}p (wanted {settings['preferred_resolution']})")
+                logging.info(f"Video title: {stream_info_cache['title']}")
+                logging.info(f"Selected resolution: {actual_height}p")
+                logging.info("Successfully got stream URL")
+        except Exception as e:
+            logging.error(f"Error fetching stream info: {e}")
+            # Clear cache on error
+            stream_info_cache['url'] = None
+            raise
+    else:
+        logging.info("Using cached stream info")
+    
+    return stream_info_cache
+
 def capture_screenshot():
     """Capture a screenshot from the YouTube stream."""
     try:
@@ -496,26 +552,13 @@ def capture_screenshot():
             logging.info(f"Creating output directory: {settings['output_path']}")
             os.makedirs(settings['output_path'])
 
-        # Get video info using yt-dlp
+        # Get stream info from cache
         try:
-            logging.info("Using yt-dlp to get video info...")
-            ydl_opts = {
-                'quiet': True,
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(settings['youtube_url'], download=False)
-                # Get best matching format based on preferred resolution
-                best_format = get_best_matching_format(info['formats'], settings['preferred_resolution'])
-                if not best_format:
-                    raise Exception("No suitable video format found")
-                
-                # Get stream URL
-                stream_url = best_format['url']
-                video_title = info.get('title', 'untitled')
-                actual_height = best_format.get('height', 'unknown')
-                logging.info(f"Video title: {video_title}")
-                logging.info(f"Selected resolution: {actual_height}p")
-                logging.info("Successfully got stream URL")
+            stream_info = get_stream_info()
+            stream_url = stream_info['stream_url']
+            video_title = stream_info['title']
+            best_format = stream_info['format']
+            actual_height = best_format.get('height', 'unknown')
 
             # Create filename with full timestamp and cleaned title
             timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
@@ -548,11 +591,11 @@ def capture_screenshot():
             else:
                 raise Exception("Screenshot file was not created")
 
-        except subprocess.CalledProcessError as e:
+        except Exception as e:
             error_msg = f"Failed to capture screenshot: {str(e)}"
             logging.error(f"{error_msg}")
-            logging.error(f"Command output: {e.output}")
-            logging.error(f"Command stderr: {e.stderr}")
+            logging.error(f"Stream info cache will be cleared")
+            stream_info_cache['url'] = None  # Clear cache on error
             notify("Error", error_msg)
             return False
 
@@ -575,30 +618,18 @@ def set_youtube_url(icon, item):
             return
         
         try:
-            # Test URL format using yt-dlp
-            with yt_dlp.YoutubeDL() as ydl:
-                info = ydl.extract_info(url, download=False)
-                if not info:
-                    raise ValueError("Could not extract video information")
-                
-                # Get available formats
-                formats = info.get('formats', [])
-                if not formats:
-                    raise ValueError("No video formats available")
-                
-                # Find best format matching preferred resolution
-                best_format = get_best_matching_format(formats, settings['preferred_resolution'])
-                if not best_format:
-                    raise ValueError(f"No suitable format found for {settings['preferred_resolution']}")
-                
-                # Update settings
-                settings['youtube_url'] = url
-                save_settings()
-                
-                notify("URL Updated", f"YouTube URL set to: {url}")
-                on_closing()
-                
+            # Test URL and update cache immediately
+            old_url = settings['youtube_url']
+            settings['youtube_url'] = url
+            get_stream_info()  # This will cache the stream info
+            
+            save_settings()
+            notify("URL Updated", f"YouTube URL set to: {url}")
+            on_closing()
+            
         except Exception as e:
+            # Restore old URL on error
+            settings['youtube_url'] = old_url
             notify("Error", f"Invalid YouTube URL: {str(e)}")
             return
 
