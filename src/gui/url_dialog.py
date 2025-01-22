@@ -1,20 +1,27 @@
 import logging
 import customtkinter as ctk
-from typing import Optional, Dict, Any, Callable
+import threading
+import yt_dlp
+from typing import Optional, Dict, Any, Callable, List
 
 logger = logging.getLogger(__name__)
 
 class URLDialog:
     def __init__(self, parent: Optional[ctk.CTk] = None, settings: Dict[str, Any] = None,
-                 on_save: Optional[Callable[[str], None]] = None):
+                 on_save: Optional[Callable[[List[str], List[str]], None]] = None):
         """Initialize URL dialog."""
         self.window = ctk.CTkToplevel(parent) if parent else ctk.CTk()
-        self.window.title("Set YouTube URL")
-        self.window.geometry("600x150")
+        self.window.title("Set YouTube URLs")
+        self.window.geometry("600x300")  # Made taller for status messages
         self.window.grab_set()  # Make dialog modal
         
         self.settings = settings or {}
         self.on_save = on_save
+        self.ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': True
+        }
         
         self._setup_ui()
         
@@ -25,34 +32,90 @@ class URLDialog:
         main_frame.pack(fill="both", expand=True, padx=10, pady=10)
         
         # URL input
-        url_label = ctk.CTkLabel(main_frame, text="YouTube URL:")
+        url_label = ctk.CTkLabel(main_frame, text="YouTube URLs (one per line):")
         url_label.pack(pady=5)
         
-        self.url_entry = ctk.CTkEntry(main_frame, width=400)
+        self.url_entry = ctk.CTkTextbox(main_frame, width=400, height=100)
         self.url_entry.pack(pady=5)
-        self.url_entry.insert(0, self.settings.get('youtube_url', ''))
+        # Insert any existing URLs
+        if self.settings.get('youtube_urls'):
+            self.url_entry.insert('1.0', '\n'.join(self.settings.get('youtube_urls', [])))
+        
+        # Status message
+        self.status_label = ctk.CTkLabel(main_frame, text="", text_color="gray")
+        self.status_label.pack(pady=5)
         
         # Create buttons frame
         button_frame = ctk.CTkFrame(main_frame)
         button_frame.pack(fill="x", pady=10)
         
         # Save button
-        save_button = ctk.CTkButton(button_frame, text="Save", command=self._on_save)
-        save_button.pack(side="right", padx=5)
+        self.save_button = ctk.CTkButton(button_frame, text="Save", command=self._on_save)
+        self.save_button.pack(side="right", padx=5)
         
         # Cancel button
         cancel_button = ctk.CTkButton(button_frame, text="Cancel", command=self.window.destroy)
         cancel_button.pack(side="right", padx=5)
     
+    def _validate_stream(self, url: str) -> bool:
+        """Check if URL is a valid and accessible live stream."""
+        try:
+            with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                return True
+        except Exception as e:
+            logger.warning(f"Invalid stream URL {url}: {str(e)}")
+            return False
+    
+    def _is_valid_youtube_url(self, url: str) -> bool:
+        """Check if the URL is a valid YouTube URL."""
+        youtube_domains = ['youtube.com', 'youtu.be', 'www.youtube.com']
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            return any(domain in parsed.netloc for domain in youtube_domains)
+        except:
+            return False
+            
     def _on_save(self) -> None:
         """Handle save button click."""
-        url = self.url_entry.get().strip()
-        if url:
+        urls_text = self.url_entry.get('1.0', 'end-1c').strip()
+        if not urls_text:
+            logger.error("No URLs entered")
+            self.status_label.configure(text="No URLs entered", text_color="red")
+            self.window.bell()
+            return
+
+        # Get all URLs first
+        urls = [url.strip() for url in urls_text.split('\n') if url.strip()]
+        
+        if self.on_save:
+            # Pass all URLs for validation, close dialog immediately
+            self.on_save(urls, [])  # Pass empty list as valid URLs initially
+            self.window.destroy()
+    
+    def _handle_validation_result(self, valid_urls: List[str], invalid_urls: List[str]) -> None:
+        """Handle validation results and update UI."""
+        if valid_urls:
+            if invalid_urls:
+                self.status_label.configure(
+                    text=f"Found {len(valid_urls)} valid and {len(invalid_urls)} invalid URLs",
+                    text_color="orange"
+                )
+            else:
+                self.status_label.configure(
+                    text=f"All {len(valid_urls)} URLs are valid",
+                    text_color="green"
+                )
             if self.on_save:
-                self.on_save(url)
+                self.on_save(valid_urls)
             self.window.destroy()
         else:
-            logger.error("No URL entered")
+            self.status_label.configure(
+                text="No valid YouTube URLs found",
+                text_color="red"
+            )
+            self.save_button.configure(state="normal")
             self.window.bell()
             
     def run(self) -> None:

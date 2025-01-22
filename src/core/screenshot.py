@@ -3,6 +3,7 @@ import cv2
 import yt_dlp
 import logging
 import subprocess
+import threading
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Tuple, Any
 
@@ -10,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 class StreamInfoCache:
     """Cache for stream information to reduce API calls."""
-    def __init__(self, cache_duration: int = 60):
+    def __init__(self, cache_duration: int = 10800):  # 3 hours in seconds
         self._cache = {}
         self._cache_duration = timedelta(seconds=cache_duration)
 
@@ -40,6 +41,7 @@ class ScreenshotCapture:
             'no_warnings': True,
             'extract_flat': True
         }
+        self._prefetch_thread = None
 
     def get_stream_info(self, url: str, preferred_resolution: str = '1080p') -> Dict[str, Any]:
         """Get stream information, using cache if available."""
@@ -85,15 +87,16 @@ class ScreenshotCapture:
     def capture_screenshot(self, stream_info: Dict[str, Any], output_path: str) -> Optional[str]:
         """Capture a screenshot from the stream."""
         try:
-            # Create output directory if it doesn't exist
-            os.makedirs(output_path, exist_ok=True)
+            # Create stream-specific subdirectory using cleaned title
+            stream_dir = self._clean_filename(stream_info['title'])
+            stream_path = os.path.join(output_path, stream_dir)
+            os.makedirs(stream_path, exist_ok=True)
             
             # Generate output filename
             now = datetime.now()
             timestamp = now.strftime('%Y-%m-%d_%H-%M-%S')
-            filename = f"{timestamp}_{stream_info['title']}.jpg"
-            filename = self._clean_filename(filename)
-            full_path = os.path.join(output_path, filename)
+            filename = f"{timestamp}.jpg"
+            full_path = os.path.join(stream_path, filename)
             
             # Use ffmpeg to capture frame
             cmd = [
@@ -142,3 +145,25 @@ class ScreenshotCapture:
             filename = name + ext
         
         return filename.strip()
+
+    def prefetch_stream_info(self, urls: list[str], preferred_resolution: str = '1080p') -> None:
+        """Prefetch stream information for multiple URLs in background."""
+        def _prefetch():
+            logger.info("Starting stream info prefetch")
+            for url in urls:
+                try:
+                    if not self.stream_cache.get(url):  # Only fetch if not in cache
+                        self.get_stream_info(url, preferred_resolution)
+                        logger.info(f"Prefetched stream info for {url}")
+                except Exception as e:
+                    logger.error(f"Error prefetching stream info for {url}: {e}")
+            logger.info("Stream info prefetch completed")
+
+        # Cancel any existing prefetch
+        if self._prefetch_thread and self._prefetch_thread.is_alive():
+            logger.info("Cancelling existing prefetch")
+            self._prefetch_thread = None
+
+        # Start new prefetch thread
+        self._prefetch_thread = threading.Thread(target=_prefetch, daemon=True)
+        self._prefetch_thread.start()

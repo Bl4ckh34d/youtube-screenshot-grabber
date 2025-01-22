@@ -1,8 +1,9 @@
 import logging
 import threading
-from typing import Dict, Any
+from typing import Dict, Any, List
 import sys
 from pathlib import Path
+import yt_dlp
 
 # Add the project root to the Python path
 project_root = str(Path(__file__).parent.parent)
@@ -24,6 +25,7 @@ class App:
         self.settings = Settings()
         self.screenshot = ScreenshotCapture()
         self.scheduler = Scheduler()
+        self._validation_thread = None
         
         # Initialize with Windows location if available
         windows_location = get_windows_location()
@@ -35,7 +37,7 @@ class App:
         self.system_tray = SystemTray(
             settings=self.settings.all,
             callbacks={
-                'set_youtube_url': self.set_youtube_url,
+                'set_youtube_url': self.set_youtube_urls,
                 'set_location': self.set_location,
                 'set_interval': self.set_interval,
                 'set_resolution': self.set_resolution,
@@ -49,13 +51,62 @@ class App:
         )
         
         # Start screenshot thread if needed
-        if self.settings.get('youtube_url'):
+        if self.settings.get('youtube_urls'):
             self.start_screenshot_thread()
     
-    def set_youtube_url(self, url: str) -> None:
-        """Set YouTube URL and restart screenshot thread."""
-        self.settings.set('youtube_url', url)
-        self.start_screenshot_thread()
+    def set_youtube_urls(self, urls: List[str], valid_urls: List[str] = None) -> None:
+        """Set YouTube URLs and handle validation."""
+        # If we received initial URLs (from dialog)
+        if not valid_urls:
+            logger.info("Starting URL validation")
+            # Pause screenshot taking
+            self.scheduler.pause()
+            self.system_tray.set_paused(True)
+            
+            # Store unvalidated URLs temporarily
+            self.settings.set('pending_urls', urls)
+            
+            # Start validation in background
+            def validate_urls():
+                valid_urls = []
+                for url in urls:
+                    if self._is_valid_youtube_url(url):
+                        try:
+                            with yt_dlp.YoutubeDL(self.screenshot.ydl_opts) as ydl:
+                                ydl.extract_info(url, download=False)
+                                valid_urls.append(url)
+                                logger.info(f"Validated URL: {url}")
+                        except Exception as e:
+                            logger.warning(f"Invalid stream URL {url}: {str(e)}")
+                
+                # Update settings with validated URLs
+                self.settings.set('youtube_urls', valid_urls)
+                self.settings.set('pending_urls', None)
+                
+                # Start prefetching stream info
+                resolution = self.settings.get('resolution', '1080p')
+                self.screenshot.prefetch_stream_info(valid_urls, resolution)
+                
+                logger.info(f"URL validation complete. {len(valid_urls)} valid URLs found")
+                # Note: User must manually resume via system tray
+            
+            self._validation_thread = threading.Thread(target=validate_urls, daemon=True)
+            self._validation_thread.start()
+        
+        # If we received validated URLs (from validation process)
+        else:
+            self.settings.set('youtube_urls', valid_urls)
+            self.start_screenshot_thread()
+    
+    def _is_valid_youtube_url(self, url: str) -> bool:
+        """Check if the URL is a valid YouTube URL."""
+        youtube_domains = ['youtube.com', 'youtu.be', 'www.youtube.com']
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            return any(domain in parsed.netloc for domain in youtube_domains)
+        except:
+            return False
     
     def set_location(self, location: Dict[str, float]) -> None:
         """Set location and update scheduler."""
@@ -121,7 +172,7 @@ class App:
         """Start or restart the screenshot thread."""
         self.scheduler.stop()
         
-        if self.settings.get('youtube_url'):
+        if self.settings.get('youtube_urls'):
             self.update_scheduler()
     
     def update_scheduler(self) -> None:
@@ -148,11 +199,11 @@ class App:
         )
     
     def capture_screenshot(self) -> None:
-        """Capture a screenshot."""
+        """Capture screenshots from all configured streams."""
         try:
-            url = self.settings.get('youtube_url')
-            if not url:
-                logger.warning("No YouTube URL set")
+            urls = self.settings.get('youtube_urls', [])
+            if not urls:
+                logger.warning("No YouTube URLs set")
                 return
                 
             output_path = self.settings.get('output_path')
@@ -162,22 +213,29 @@ class App:
             
             resolution = self.settings.get('resolution', '1080p')
             
-            # Get stream info (cached if available)
-            stream_info = self.screenshot.get_stream_info(url, resolution)
-            
-            # Capture screenshot
-            screenshot_path = self.screenshot.capture_screenshot(
-                stream_info,
-                output_path
-            )
-            
-            if screenshot_path:
-                logger.info(f"Screenshot saved to: {screenshot_path}")
-            else:
-                logger.error("Failed to capture screenshot")
-                
+            # Capture from each stream
+            for url in urls:
+                try:
+                    # Get stream info (cached if available)
+                    stream_info = self.screenshot.get_stream_info(url, resolution)
+                    
+                    # Capture screenshot
+                    screenshot_path = self.screenshot.capture_screenshot(
+                        stream_info,
+                        output_path
+                    )
+                    
+                    if screenshot_path:
+                        logger.info(f"Screenshot saved to: {screenshot_path}")
+                    else:
+                        logger.error(f"Failed to capture screenshot from {url}")
+                        
+                except Exception as e:
+                    logger.error(f"Error capturing screenshot from {url}: {e}")
+                    continue  # Continue with next URL if one fails
+                    
         except Exception as e:
-            logger.error(f"Error capturing screenshot: {e}")
+            logger.error(f"Error in capture process: {e}")
     
     def run(self) -> None:
         """Run the application."""
