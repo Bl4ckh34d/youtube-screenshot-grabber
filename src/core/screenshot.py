@@ -4,6 +4,9 @@ import yt_dlp
 import logging
 import subprocess
 import threading
+import multiprocessing as mp
+from queue import Empty
+from time import sleep, time
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Tuple, Any
 import concurrent.futures
@@ -55,15 +58,23 @@ class ScreenshotCapture:
         # Get fresh info
         try:
             with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
+                logger.info(f"Fetching fresh info from YouTube for {url}")
                 info = ydl.extract_info(url, download=False)
                 formats = info.get('formats', [])
                 best_format = self._get_best_matching_format(formats, preferred_resolution)
+                
+                # Get raw title and remove date/time part
+                raw_title = info.get('title', 'Untitled')
+                logger.debug(f"Raw YouTube title: {raw_title}")
+                if ' 2025-' in raw_title:
+                    raw_title = raw_title.split(' 2025-')[0].strip()
+                    logger.debug(f"Cleaned YouTube title: {raw_title}")
                 
                 result = {
                     'url': best_format['url'],
                     'resolution': f"{best_format.get('height', 0)}p",
                     'preferred_resolution': preferred_resolution,
-                    'title': info.get('title', 'Untitled'),
+                    'title': raw_title,
                     'format_id': best_format['format_id']
                 }
                 
@@ -91,14 +102,21 @@ class ScreenshotCapture:
     def capture_screenshot(self, stream_info: Dict[str, Any], output_path: str) -> Optional[str]:
         """Capture a screenshot from the stream."""
         try:
-            # Create stream-specific subdirectory using cleaned title only
-            stream_dir = self._clean_filename(stream_info['title'])
-            stream_path = os.path.join(output_path, stream_dir)
-            os.makedirs(stream_path, exist_ok=True)
-            
             # Generate output filename with timestamp
             now = datetime.now()
             timestamp = now.strftime('%Y-%m-%d_%H-%M-%S')
+            
+            # Clean the title once, use it for both folder and file
+            clean_title = self._clean_filename(stream_info['title'])
+            logger.info(f"Title from stream_info: {stream_info['title']}")
+            logger.info(f"Clean title for folder: {clean_title}")
+            
+            # Create stream-specific subdirectory using just the clean title
+            stream_path = os.path.join(output_path, clean_title)
+            logger.debug(f"Creating folder: {stream_path}")
+            os.makedirs(stream_path, exist_ok=True)
+            
+            # Use timestamp only for the file
             filename = f"{timestamp}.jpg"
             full_path = os.path.join(stream_path, filename)
             
@@ -188,3 +206,106 @@ class ScreenshotCapture:
         self._prefetch_thread = threading.Thread(target=_prefetch, daemon=True)
         self._prefetch_thread.start()
         logger.debug("Started prefetch thread")
+
+class StreamProcess:
+    """Manages continuous screenshot capture for a single stream."""
+    def __init__(self, url: str, output_path: str, interval: int, resolution: str = '1080p'):
+        self.url = url
+        self.output_path = output_path
+        self.interval = interval
+        self.resolution = resolution
+        self.process = None
+        self.stop_event = None
+        self.screenshot_capture = ScreenshotCapture()
+
+    def _capture_loop(self, stop_event: mp.Event):
+        """Continuous capture loop running in its own process."""
+        logger.info(f"Starting capture loop for {self.url}")
+        try:
+            # Get initial stream info
+            stream_info = self.screenshot_capture.get_stream_info(self.url, self.resolution)
+            logger.info(f"Got stream info for {self.url}")
+            
+            while not stop_event.is_set():
+                start_time = time()
+                
+                try:
+                    # Take screenshot directly in this process
+                    screenshot_path = self.screenshot_capture.capture_screenshot(stream_info, self.output_path)
+                    if screenshot_path:
+                        logger.info(f"Screenshot saved: {screenshot_path}")
+                except Exception as e:
+                    logger.error(f"Error taking screenshot for {self.url}: {e}")
+                
+                # Calculate sleep time for next interval
+                elapsed = time() - start_time
+                sleep_time = max(0, self.interval - elapsed)
+                logger.debug(f"Capture took {elapsed:.2f}s, sleeping for {sleep_time:.2f}s")
+                
+                # Sleep until next interval
+                sleep(sleep_time)
+                
+        except Exception as e:
+            logger.error(f"Error in capture loop for {self.url}: {e}")
+
+    def start(self):
+        """Start the stream capture process."""
+        self.stop_event = mp.Event()
+        self.process = mp.Process(
+            target=self._capture_loop,
+            args=(self.stop_event,),
+            daemon=False
+        )
+        self.process.start()
+        logger.info(f"Started capture process for {self.url}")
+
+    def stop(self):
+        """Stop the stream capture process."""
+        if self.stop_event:
+            self.stop_event.set()
+        if self.process:
+            self.process.join(timeout=1)
+            if self.process.is_alive():
+                self.process.terminate()
+            self.process = None
+        logger.info(f"Stopped capture process for {self.url}")
+
+class StreamManager:
+    """Manages multiple stream capture processes."""
+    def __init__(self):
+        self.streams: Dict[str, StreamProcess] = {}
+
+    def add_stream(self, url: str, output_path: str, interval: int, resolution: str = '1080p'):
+        """Add and start a new stream capture process."""
+        if url in self.streams:
+            self.remove_stream(url)
+        stream_process = StreamProcess(url, output_path, interval, resolution)
+        stream_process.start()
+        self.streams[url] = stream_process
+
+    def remove_stream(self, url: str):
+        """Stop and remove a stream capture process."""
+        if url in self.streams:
+            self.streams[url].stop()
+            del self.streams[url]
+
+    def update_interval(self, interval: int):
+        """Update interval for all streams."""
+        urls = list(self.streams.keys())
+        for url in urls:
+            stream = self.streams[url]
+            output_path = stream.output_path
+            resolution = stream.resolution
+            self.remove_stream(url)
+            self.add_stream(url, output_path, interval, resolution)
+
+    def stop_all(self):
+        """Stop all stream capture processes in parallel."""
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            # Start stopping all streams in parallel
+            futures = [
+                executor.submit(self.remove_stream, url)
+                for url in list(self.streams.keys())
+            ]
+            # Wait for all to complete
+            concurrent.futures.wait(futures)

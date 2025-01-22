@@ -17,7 +17,7 @@ if project_root not in sys.path:
 from src.utils.logging_config import setup_logging
 from src.core.settings import Settings
 from src.core.location import get_windows_location, get_location_info
-from src.core.screenshot import ScreenshotCapture
+from src.core.screenshot import ScreenshotCapture, StreamManager
 from src.core.scheduler import Scheduler
 from src.gui.system_tray import SystemTray
 
@@ -30,6 +30,7 @@ class App:
         """Initialize the application."""
         self.settings = Settings()
         self.screenshot = ScreenshotCapture()
+        self.stream_manager = StreamManager()
         self.scheduler = Scheduler()
         self._validation_thread = None
         self._total_screenshots = 0  # Counter for total screenshots since app start
@@ -148,6 +149,8 @@ class App:
         interval = int(interval)
         self.settings.set('interval', interval)
         self.scheduler.update_settings(interval=interval)
+        # Update interval for all running streams
+        self.stream_manager.update_interval(interval)
         self.system_tray.update_settings(self.settings.all)
     
     def set_resolution(self, resolution: str) -> None:
@@ -195,6 +198,7 @@ class App:
     def quit(self) -> None:
         """Quit the application."""
         self.scheduler.stop()
+        self.stream_manager.stop_all()
         if self.system_tray.icon:
             self.system_tray.icon.stop()
     
@@ -229,7 +233,7 @@ class App:
         )
     
     def capture_screenshot(self) -> None:
-        """Capture screenshots from all configured streams."""
+        """Start or update screenshot capture processes for all configured streams."""
         try:
             urls = self.settings.get('youtube_urls', [])
             if not urls:
@@ -241,40 +245,24 @@ class App:
                 logger.warning("No output path set")
                 return
             
+            interval = int(self.settings.get('interval', 60))
             resolution = self.settings.get('resolution', '1080p')
             
-            def capture_single(url):
-                try:
-                    # Get stream info (cached if available)
-                    stream_info = self.screenshot.get_stream_info(url, resolution)
-                    
-                    # Capture screenshot
-                    screenshot_path = self.screenshot.capture_screenshot(
-                        stream_info,
-                        output_path
-                    )
-                    
-                    if screenshot_path:
-                        logger.info(f"Screenshot saved: {screenshot_path}")
-                    return True
-                except Exception as e:
-                    logger.error(f"Failed to capture from {url}: {str(e)}")
-                    return False
+            # Get current stream URLs
+            current_urls = set(self.stream_manager.streams.keys())
+            new_urls = set(urls)
             
-            # Capture screenshots in parallel
-            with concurrent.futures.ThreadPoolExecutor(max_workers=len(urls)) as executor:
-                results = list(executor.map(capture_single, urls))
-                
-            success_count = sum(1 for r in results if r)
-            if success_count > 0:
-                self._total_screenshots += 1  # Increment by 1 for each batch
-                ordinal = lambda n: f"{n}{'th' if 11 <= n % 100 <= 13 else {1:'st',2:'nd',3:'rd'}.get(n % 10, 'th')}"
-                logger.info(f"Successfully captured the {ordinal(self._total_screenshots)} screenshot ({success_count} out of {len(urls)} streams)")
-                logger.info("-" * 45)
+            # Remove streams that are no longer in the URL list
+            for url in current_urls - new_urls:
+                self.stream_manager.remove_stream(url)
+            
+            # Add new streams
+            for url in new_urls - current_urls:
+                self.stream_manager.add_stream(url, output_path, interval, resolution)
             
         except Exception as e:
-            logger.error(f"Error capturing screenshots: {str(e)}")
-    
+            logger.error(f"Error managing screenshot processes: {str(e)}")
+            
     def run(self) -> None:
         """Run the application."""
         try:
