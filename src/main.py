@@ -1,9 +1,11 @@
 import logging
 import threading
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import sys
 from pathlib import Path
 import yt_dlp
+import concurrent.futures
+import queue
 
 # Add the project root to the Python path
 project_root = str(Path(__file__).parent.parent)
@@ -17,7 +19,9 @@ from src.core.screenshot import ScreenshotCapture
 from src.core.scheduler import Scheduler
 from src.gui.system_tray import SystemTray
 
-logger = setup_logging()
+# Initialize logging first
+setup_logging()
+logger = logging.getLogger(__name__)
 
 class App:
     def __init__(self):
@@ -62,7 +66,7 @@ class App:
         """Set YouTube URLs and handle validation."""
         # If we received initial URLs (from dialog)
         if not valid_urls:
-            logger.info("Starting URL validation")
+            logger.debug(f"Starting parallel URL validation for {len(urls)} URLs")
             # Pause screenshot taking
             self.scheduler.pause()
             self.system_tray.set_paused(True)
@@ -73,32 +77,50 @@ class App:
             # Start validation in background
             def validate_urls():
                 valid_urls = []
-                for url in urls:
+                validated_queue = queue.Queue()
+                resolution = self.settings.get('resolution', '1080p')
+                
+                def validate_single_url(url: str):
+                    """Validate a single URL and add to queue if valid."""
+                    logger.debug(f"Starting validation of URL: {url}")
                     if self._is_valid_youtube_url(url):
+                        logger.debug(f"URL has valid YouTube domain: {url}")
                         try:
                             with yt_dlp.YoutubeDL(self.screenshot.ydl_opts) as ydl:
-                                ydl.extract_info(url, download=False)
+                                info = ydl.extract_info(url, download=False)
+                                logger.debug(f"Successfully extracted info for URL: {url} (Title: {info.get('title', 'Unknown')})")
+                                validated_queue.put(url)
                                 valid_urls.append(url)
-                                logger.info(f"Validated URL: {url}")
+                                # Start prefetching for this URL immediately
+                                logger.debug(f"Starting immediate prefetch for validated URL: {url}")
+                                self.screenshot.prefetch_stream_info([url], resolution)
                         except Exception as e:
                             logger.warning(f"Invalid stream URL {url}: {str(e)}")
+                    else:
+                        logger.warning(f"Invalid YouTube domain for URL: {url}")
+
+                # Use ThreadPoolExecutor for parallel validation
+                with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(urls), 50)) as executor:
+                    logger.debug(f"Created thread pool with {min(len(urls), 50)} workers")
+                    # Submit all validation tasks
+                    futures = [executor.submit(validate_single_url, url) for url in urls]
+                    # Wait for all to complete
+                    concurrent.futures.wait(futures)
                 
-                # Update settings with validated URLs
+                # Update settings with all validated URLs
                 self.settings.set('youtube_urls', valid_urls)
                 self.settings.set('pending_urls', None)
                 
-                # Start prefetching stream info
-                resolution = self.settings.get('resolution', '1080p')
-                self.screenshot.prefetch_stream_info(valid_urls, resolution)
-                
-                logger.info(f"URL validation complete. {len(valid_urls)} valid URLs found")
+                logger.info(f"URL validation complete. {len(valid_urls)} valid URLs found out of {len(urls)} total")
                 # Note: User must manually resume via system tray
             
             self._validation_thread = threading.Thread(target=validate_urls, daemon=True)
             self._validation_thread.start()
+            logger.debug("Started validation thread")
         
         # If we received validated URLs (from validation process)
         else:
+            logger.debug(f"Received {len(valid_urls)} pre-validated URLs")
             self.settings.set('youtube_urls', valid_urls)
             self.start_screenshot_thread()
     
