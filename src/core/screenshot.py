@@ -63,9 +63,12 @@ class ScreenshotCapture:
                 result = {
                     'url': best_format['url'],
                     'resolution': f"{best_format.get('height', 0)}p",
+                    'preferred_resolution': preferred_resolution,
                     'title': info.get('title', 'Untitled'),
                     'format_id': best_format['format_id']
                 }
+                
+                logger.info(f"Stream info: Requested {preferred_resolution}, got {result['resolution']} (format: {best_format['format_id']})")
                 
                 # Cache the result
                 self.stream_cache.set(url, result)
@@ -84,7 +87,12 @@ class ScreenshotCapture:
             
         # Sort by height and prefer formats closer to target
         formats.sort(key=lambda x: abs(x['height'] - target_height))
-        return formats[0]
+        selected_format = formats[0]
+        
+        logger.debug("Available resolutions: " + str([f"{f.get('height')}p" for f in formats]))
+        logger.debug(f"Selected format: {selected_format.get('height')}p (target was {target_height}p)")
+        
+        return selected_format
 
     def capture_screenshot(self, stream_info: Dict[str, Any], output_path: str) -> Optional[str]:
         """Capture a screenshot from the stream."""

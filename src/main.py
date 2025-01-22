@@ -21,7 +21,7 @@ from src.gui.system_tray import SystemTray
 
 # Initialize logging first
 setup_logging()
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('src.core.scheduler')
 
 class App:
     def __init__(self):
@@ -151,6 +151,7 @@ class App:
         """Set preferred resolution."""
         self.settings.set('resolution', resolution)
         self.system_tray.update_settings(self.settings.all)
+        logger.info("Scheduler settings updated")
     
     def set_time_window(self, minutes: int) -> None:
         """Set time window for sunset/sunrise captures."""

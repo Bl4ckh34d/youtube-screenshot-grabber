@@ -80,15 +80,22 @@ class SystemTray:
             return pystray.Menu(*[create_interval_item(text, interval) for text, interval in intervals])
 
         def get_resolution_menu():
-            resolutions = ['2160p', '1440p', '1080p', '720p', '480p', '360p']
-            return pystray.Menu(*[
-                pystray.MenuItem(
+            def create_resolution_item(res: str):
+                def check_resolution(item):
+                    return self.settings.get('resolution', '1080p') == res
+                    
+                def set_resolution(icon, item):
+                    self._handle_resolution_change(res)
+                    
+                return pystray.MenuItem(
                     res,
-                    action=lambda _, r=res: self.callbacks['set_resolution'](r),
-                    checked=lambda item, r=res: self.settings.get('resolution') == r,
+                    set_resolution,
+                    checked=check_resolution,
                     radio=True
-                ) for res in resolutions
-            ])
+                )
+            
+            resolutions = ['2160p', '1440p', '1080p', '720p', '480p', '360p']
+            return pystray.Menu(*[create_resolution_item(res) for res in resolutions])
 
         def get_time_window_menu():
             def create_time_window_item(text: str, minutes_value: int):
@@ -173,11 +180,24 @@ class SystemTray:
             pystray.MenuItem("Quit", action=lambda _: self.callbacks['quit']())
         )
 
+    def _handle_resolution_change(self, resolution: str) -> None:
+        """Handle resolution change and update menu."""
+        self.callbacks['set_resolution'](resolution)
+        # Force menu refresh immediately after resolution change
+        if self.icon:
+            new_menu = self.create_menu()
+            self.icon.menu = new_menu
+            self.icon.update_menu()
+
     def update_settings(self, new_settings: Dict[str, Any]) -> None:
         """Update settings and refresh menu."""
         self.settings.update(new_settings)
         if self.icon:
-            self.icon.menu = self.create_menu()
+            # Recreate the menu with new settings
+            new_menu = self.create_menu()
+            self.icon.menu = new_menu
+            # Force an update of the menu
+            self.icon.update_menu()
 
     def run(self) -> None:
         """Run the system tray icon."""
@@ -201,7 +221,7 @@ class SystemTray:
         """Update the system tray menu."""
         if self.icon:
             self.icon.menu = self.create_menu()
-            
+
     def set_paused(self, paused: bool) -> None:
         """Set the paused state."""
         self._paused = paused
