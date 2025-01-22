@@ -1,11 +1,13 @@
+import os
 import logging
 import threading
-from typing import Dict, Any, List, Optional
-import sys
-from pathlib import Path
-import yt_dlp
 import concurrent.futures
 import queue
+from datetime import datetime
+from pathlib import Path
+import yt_dlp
+from typing import Dict, Any, List, Optional
+import sys
 
 # Add the project root to the Python path
 project_root = str(Path(__file__).parent.parent)
@@ -30,6 +32,7 @@ class App:
         self.screenshot = ScreenshotCapture()
         self.scheduler = Scheduler()
         self._validation_thread = None
+        self._total_screenshots = 0  # Counter for total screenshots since app start
         
         # Only use Windows location if no location is saved
         saved_location = self.settings.get('location', {})
@@ -240,8 +243,7 @@ class App:
             
             resolution = self.settings.get('resolution', '1080p')
             
-            # Capture from each stream
-            for url in urls:
+            def capture_single(url):
                 try:
                     # Get stream info (cached if available)
                     stream_info = self.screenshot.get_stream_info(url, resolution)
@@ -253,16 +255,25 @@ class App:
                     )
                     
                     if screenshot_path:
-                        logger.info(f"Screenshot saved to: {screenshot_path}")
-                    else:
-                        logger.error(f"Failed to capture screenshot from {url}")
-                        
+                        logger.info(f"Screenshot saved: {screenshot_path}")
+                    return True
                 except Exception as e:
-                    logger.error(f"Error capturing screenshot from {url}: {e}")
-                    continue  # Continue with next URL if one fails
-                    
+                    logger.error(f"Failed to capture from {url}: {str(e)}")
+                    return False
+            
+            # Capture screenshots in parallel
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(urls)) as executor:
+                results = list(executor.map(capture_single, urls))
+                
+            success_count = sum(1 for r in results if r)
+            if success_count > 0:
+                self._total_screenshots += 1  # Increment by 1 for each batch
+                ordinal = lambda n: f"{n}{'th' if 11 <= n % 100 <= 13 else {1:'st',2:'nd',3:'rd'}.get(n % 10, 'th')}"
+                logger.info(f"Successfully captured the {ordinal(self._total_screenshots)} screenshot ({success_count} out of {len(urls)} streams)")
+                logger.info("-" * 45)
+            
         except Exception as e:
-            logger.error(f"Error in capture process: {e}")
+            logger.error(f"Error capturing screenshots: {str(e)}")
     
     def run(self) -> None:
         """Run the application."""

@@ -50,7 +50,6 @@ class ScreenshotCapture:
         # Check cache first
         cached_info = self.stream_cache.get(url)
         if cached_info:
-            logger.info("Using cached stream info")
             return cached_info
 
         # Get fresh info
@@ -67,8 +66,6 @@ class ScreenshotCapture:
                     'title': info.get('title', 'Untitled'),
                     'format_id': best_format['format_id']
                 }
-                
-                logger.info(f"Stream info: Requested {preferred_resolution}, got {result['resolution']} (format: {best_format['format_id']})")
                 
                 # Cache the result
                 self.stream_cache.set(url, result)
@@ -88,10 +85,7 @@ class ScreenshotCapture:
         # Sort by height and prefer formats closer to target
         formats.sort(key=lambda x: abs(x['height'] - target_height))
         selected_format = formats[0]
-        
-        logger.debug("Available resolutions: " + str([f"{f.get('height')}p" for f in formats]))
-        logger.debug(f"Selected format: {selected_format.get('height')}p (target was {target_height}p)")
-        
+
         return selected_format
 
     def capture_screenshot(self, stream_info: Dict[str, Any], output_path: str) -> Optional[str]:
@@ -125,13 +119,18 @@ class ScreenshotCapture:
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 startupinfo.wShowWindow = subprocess.SW_HIDE
 
-            subprocess.run(cmd, 
-                         capture_output=True, 
-                         check=True,
-                         startupinfo=startupinfo,
-                         creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            # Run ffmpeg and capture error output
+            process = subprocess.run(
+                cmd,
+                startupinfo=startupinfo,
+                capture_output=True,
+                text=True
+            )
             
-            logger.info(f"Screenshot saved to: {full_path}")
+            if process.returncode != 0:
+                logger.error(f"ffmpeg error output: {process.stderr}")
+                raise Exception(f"ffmpeg failed: {process.stderr}")
+
             return full_path
             
         except Exception as e:
@@ -164,8 +163,6 @@ class ScreenshotCapture:
                     logger.debug(f"Cache miss for {url}, fetching stream info")
                     info = self.get_stream_info(url, preferred_resolution)
                     logger.debug(f"Successfully prefetched stream info for {url} (Resolution: {info.get('resolution', 'unknown')})")
-                else:
-                    logger.debug(f"Using cached info for {url}")
             except Exception as e:
                 logger.error(f"Error prefetching stream info for {url}: {e}")
 

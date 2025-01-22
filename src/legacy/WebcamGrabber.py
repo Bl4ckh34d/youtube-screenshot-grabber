@@ -592,8 +592,6 @@ def get_stream_info():
             # Clear cache on error
             stream_info_cache['url'] = None
             raise
-    else:
-        logging.info("Using cached stream info")
     
     return stream_info_cache
 
