@@ -91,12 +91,12 @@ class ScreenshotCapture:
     def capture_screenshot(self, stream_info: Dict[str, Any], output_path: str) -> Optional[str]:
         """Capture a screenshot from the stream."""
         try:
-            # Create stream-specific subdirectory using cleaned title
+            # Create stream-specific subdirectory using cleaned title only
             stream_dir = self._clean_filename(stream_info['title'])
             stream_path = os.path.join(output_path, stream_dir)
             os.makedirs(stream_path, exist_ok=True)
             
-            # Generate output filename
+            # Generate output filename with timestamp
             now = datetime.now()
             timestamp = now.strftime('%Y-%m-%d_%H-%M-%S')
             filename = f"{timestamp}.jpg"
