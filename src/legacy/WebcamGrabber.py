@@ -349,12 +349,69 @@ def set_location(icon, item):
     update_sun_times(settings['location']['latitude'], settings['location']['longitude'])
     
     # Create map frame that will expand with window
+    logging.info("Creating map frame...")
     map_frame = ctk.CTkFrame(main_frame)
     map_frame.pack(fill="both", expand=True, padx=5, pady=5)
     
     # Create map widget with a reference we keep
-    map_widget = tkintermapview.TkinterMapView(map_frame, width=800, height=400, corner_radius=0)
-    map_widget.pack(fill="both", expand=True)
+    logging.info("Initializing map widget...")
+    try:
+        map_widget = tkintermapview.TkinterMapView(
+            map_frame,
+            width=800,
+            height=400,
+            corner_radius=0
+        )
+        logging.info("Map widget created successfully")
+        map_widget.pack(fill="both", expand=True)
+        
+        # Configure tile server (try alternative server)
+        logging.info("Setting tile server...")
+        try:
+            # Try OpenStreetMap first as it's more reliable
+            map_widget.set_tile_server("https://tile.openstreetmap.org/{z}/{x}/{y}.png", max_zoom=19)
+            logging.info("OpenStreetMap tile server configured")
+        except Exception as e:
+            logging.error(f"Failed to set OpenStreetMap tile server, trying Google Maps: {e}")
+            try:
+                map_widget.set_tile_server("https://mt0.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}&s=Ga", max_zoom=19)
+                logging.info("Google Maps tile server configured")
+            except Exception as e:
+                logging.error(f"Failed to set Google Maps tile server: {e}")
+                raise
+        
+        try:
+            # Set initial map position and marker
+            if settings['location']['latitude'] != 0 or settings['location']['longitude'] != 0:
+                lat = settings['location']['latitude']
+                lon = settings['location']['longitude']
+                logging.info(f"Setting map position to {lat}, {lon}")
+                map_widget.set_position(lat, lon)
+                map_widget.set_zoom(12)
+                map_widget.set_marker(lat, lon)
+                logging.info("Map position and marker set")
+            else:
+                # Default to a central position if no location is set
+                logging.info("No location set, using default position")
+                map_widget.set_position(0, 0)
+                map_widget.set_zoom(2)
+                logging.info("Default position set")
+
+        except Exception as e:
+            logging.error(f"Error setting map position: {e}", exc_info=True)
+            notify("Map Error", "Failed to set map position. You can still set coordinates manually.")
+    
+    except Exception as e:
+        logging.error(f"Error creating map widget: {e}", exc_info=True)
+        notify("Map Error", "Failed to create map widget. You can still set coordinates manually.")
+        # Create a label to show error
+        error_label = ctk.CTkLabel(
+            map_frame,
+            text="Map loading failed.\nYou can still set coordinates using the fields above.",
+            font=("Arial", 14)
+        )
+        error_label.pack(expand=True)
+        map_widget = None  # Ensure we don't use the map widget if creation failed
     
     # Add schedule toggle switch overlay on map
     schedule_var = ctk.BooleanVar(value=settings['schedule_enabled'])
@@ -367,18 +424,12 @@ def set_location(icon, item):
     )
     schedule_switch.place(relx=1.0, y=10, anchor="ne", x=-10)
     
-    # Set initial map position and marker
-    if settings['location']['latitude'] != 0 or settings['location']['longitude'] != 0:
-        lat = settings['location']['latitude']
-        lon = settings['location']['longitude']
-        map_widget.set_position(lat, lon)
-        map_widget.set_zoom(12)
-        map_widget.set_marker(lat, lon)
-    else:
-        map_widget.set_zoom(8)
-    
     def on_map_click(coords):
+        if not map_widget:  # Skip if map widget failed to create
+            return
+            
         lat, lon = coords
+        logging.info(f"Map clicked at coordinates: {lat}, {lon}")
         lat_entry.delete(0, tk.END)
         lat_entry.insert(0, str(lat))
         lon_entry.delete(0, tk.END)
@@ -387,6 +438,7 @@ def set_location(icon, item):
         # Add marker at clicked position
         map_widget.delete_all_marker()
         map_widget.set_marker(lat, lon)
+        logging.info("Map marker updated")
         
         # Update sun times for new location
         update_sun_times(lat, lon)
@@ -394,7 +446,10 @@ def set_location(icon, item):
         # Save location immediately
         save_location(lat, lon)
     
-    map_widget.add_left_click_map_command(on_map_click)
+    if map_widget:  # Only add click command if map widget exists
+        logging.info("Adding map click handler...")
+        map_widget.add_left_click_map_command(on_map_click)
+        logging.info("Map click handler added")
     
     # Bind window close button and cleanup
     dialog.protocol("WM_DELETE_WINDOW", on_closing)
@@ -933,9 +988,8 @@ def run_app():
     """Run the application with system tray icon."""
     logging.info("Starting application")
     icon_image = create_icon()
-    icon = Icon("Screenshot Grabber", icon_image, menu=create_menu(None))
-    
-    icon.menu = create_menu(icon)
+    icon = Icon("Screenshot Grabber", icon_image)  # Create icon without menu first
+    icon.menu = create_menu(icon)  # Set menu once with proper icon reference
     
     logging.info("Starting screenshot thread...")
     screenshot_thread = threading.Thread(target=test_screenshots, daemon=True)

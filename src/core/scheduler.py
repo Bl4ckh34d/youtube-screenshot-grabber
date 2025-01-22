@@ -1,0 +1,109 @@
+import logging
+import threading
+import time
+from datetime import datetime
+from typing import Optional, Callable
+from astral import LocationInfo
+
+from .location import is_near_sunset_or_sunrise
+
+logger = logging.getLogger(__name__)
+
+class Scheduler:
+    def __init__(self):
+        """Initialize scheduler."""
+        self._running = False
+        self._paused = False
+        self._thread: Optional[threading.Thread] = None
+        self._callback: Optional[Callable] = None
+        self._interval = 60  # seconds
+        self._location: Optional[LocationInfo] = None
+        self._time_window = 30  # minutes
+        self._only_sunsets = False
+        self._schedule_enabled = False
+
+    def start(self, callback: Callable,
+             interval: int = 60,
+             location: Optional[LocationInfo] = None,
+             time_window: int = 30,
+             only_sunsets: bool = False,
+             schedule_enabled: bool = False) -> None:
+        """Start the scheduler with given parameters."""
+        self._callback = callback
+        self._interval = interval
+        self._location = location
+        self._time_window = time_window
+        self._only_sunsets = only_sunsets
+        self._schedule_enabled = schedule_enabled
+        
+        if not self._thread or not self._thread.is_alive():
+            self._running = True
+            self._thread = threading.Thread(target=self._run, daemon=True)
+            self._thread.start()
+            logger.info("Scheduler started")
+
+    def stop(self) -> None:
+        """Stop the scheduler."""
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=1)
+            self._thread = None
+        logger.info("Scheduler stopped")
+
+    def pause(self) -> None:
+        """Pause the scheduler."""
+        self._paused = True
+        logger.info("Scheduler paused")
+
+    def resume(self) -> None:
+        """Resume the scheduler."""
+        self._paused = False
+        logger.info("Scheduler resumed")
+
+    def update_settings(self, **kwargs) -> None:
+        """Update scheduler settings."""
+        if 'interval' in kwargs:
+            self._interval = kwargs['interval']
+        if 'location' in kwargs:
+            self._location = kwargs['location']
+        if 'time_window' in kwargs:
+            self._time_window = kwargs['time_window']
+        if 'only_sunsets' in kwargs:
+            self._only_sunsets = kwargs['only_sunsets']
+        if 'schedule_enabled' in kwargs:
+            self._schedule_enabled = kwargs['schedule_enabled']
+        logger.info("Scheduler settings updated")
+
+    def _should_capture(self) -> bool:
+        """Determine if a capture should be made now."""
+        if not self._schedule_enabled:
+            return True  # If scheduling is disabled, always capture
+            
+        if not self._location:
+            return True  # If no location set, always capture
+            
+        should_capture, event = is_near_sunset_or_sunrise(
+            self._location,
+            self._time_window,
+            self._only_sunsets
+        )
+        
+        if should_capture:
+            logger.info(f"Capture triggered by {event}")
+        
+        return should_capture
+
+    def _run(self) -> None:
+        """Main scheduler loop."""
+        while self._running:
+            if not self._paused and self._callback and self._should_capture():
+                try:
+                    self._callback()
+                except Exception as e:
+                    logger.error(f"Error in scheduler callback: {e}")
+            
+            # Sleep for the interval
+            for _ in range(self._interval):
+                if not self._running:
+                    break
+                time.sleep(1)

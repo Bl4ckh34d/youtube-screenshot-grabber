@@ -1,101 +1,89 @@
 # YouTube Screenshot Grabber
 
-A Windows system tray application that automatically captures screenshots from YouTube streams at customizable intervals.
+A Python application that captures screenshots from YouTube livestreams at regular intervals or during sunset/sunrise times.
 
 ## Features
 
-- 🎥 Capture screenshots from any YouTube video/stream
-- 🎯 Multiple resolution options (480p, 720p, 1080p, best)
-- ⚙️ Configurable screenshot intervals (5-60 seconds)
-- 🌅 Optional sunrise/sunset scheduling
-- 📍 Location-based scheduling support
-- 📂 Customizable output directory
-- 🔔 System notifications for captures and errors
-- 🖥️ Runs silently in system tray
-- 🎮 Easy-to-use context menu interface
-- 🚀 Minimal resource usage
+- Capture screenshots from YouTube livestreams at configurable intervals
+- Schedule captures around sunset and sunrise times
+- System tray interface for easy control
+- Support for multiple video resolutions
+- Configurable output directory
+- Location-based sunset/sunrise scheduling
+- Pause/resume functionality
 
-## Requirements
+## Project Structure
 
-- Windows OS
-- Python 3.10+
-- FFmpeg (added to system PATH)
+```
+youtube-screenshot-grabber/
+├── src/
+│   ├── __init__.py
+│   ├── main.py              # Main entry point
+│   ├── gui/                 # GUI components
+│   │   ├── location_dialog.py
+│   │   ├── url_dialog.py
+│   │   └── system_tray.py
+│   ├── core/               # Core functionality
+│   │   ├── settings.py
+│   │   ├── screenshot.py
+│   │   ├── scheduler.py
+│   │   └── location.py
+│   └── utils/              # Utility functions
+│       ├── logging_config.py
+│       └── file_utils.py
+└── tests/                  # Test directory
+```
 
 ## Installation
 
-1. Clone this repository:
+1. Clone the repository:
 ```bash
 git clone https://github.com/Bl4ckh34d/youtube-screenshot-grabber.git
 cd youtube-screenshot-grabber
 ```
 
-2. Install the required Python packages:
+2. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Make sure FFmpeg is installed and added to your system PATH
-
 ## Usage
 
-### Quick Start
-1. Double-click `Start WebcamGrabber.bat` to run the application
-2. Look for the camera icon in your system tray (bottom right of taskbar)
-3. Right-click the icon to access all features
+1. Run the application:
+```bash
+python -m src.main
+```
 
-### Silent Start
-For a completely headless start without any console window:
-- Double-click `Start-Silent.vbs`
+2. The application will appear in your system tray
 
-### System Tray Menu Options
-- Set/Change YouTube URL
-- Select screenshot resolution (480p, 720p, 1080p, best)
-- Adjust capture interval (5-60 seconds)
-- Choose output folder
-- Configure location for sunrise/sunset scheduling
-- Toggle scheduling on/off
-- Pause/Resume captures
-- Exit application
-
-### Advanced Features
-
-#### Sunrise/Sunset Scheduling
-The application can automatically:
-- Detect your location (using IP geolocation)
-- Calculate sunrise and sunset times
-- Only capture screenshots during daylight hours
-- Adjust schedule daily based on changing sunrise/sunset times
-
-#### Resolution Selection
-Choose from multiple quality options:
-- 480p: Fastest, lowest quality
-- 720p: Balanced option
-- 1080p: High quality (default)
-- Best: Highest available quality
+3. Right-click the tray icon to:
+   - Set YouTube URL
+   - Configure capture interval
+   - Set output directory
+   - Choose video resolution
+   - Set location for sunset/sunrise scheduling
+   - Enable/disable scheduling
+   - Pause/resume captures
 
 ## Configuration
 
-The application saves all settings in `config.json`, including:
-- Last used YouTube URL
-- Selected output path
-- Preferred screenshot interval
-- Selected resolution
-- Location settings
-- Schedule preferences
+The application saves its configuration in `config.json` with the following settings:
 
-## Dependencies
+- `youtube_url`: URL of the YouTube livestream
+- `output_path`: Directory for saving screenshots
+- `interval`: Capture interval in seconds
+- `resolution`: Preferred video resolution
+- `location`: Coordinates for sunset/sunrise calculations
+- `schedule_enabled`: Whether to use sunset/sunrise scheduling
+- `time_window`: Minutes before/after sunset/sunrise to capture
+- `only_sunsets`: Only capture during sunsets
 
-All required packages are specified in `requirements.txt` with version numbers:
-- customtkinter: Modern GUI elements
-- Pillow (PIL): Image processing
-- pystray: System tray functionality
-- plyer: System notifications
-- yt-dlp: YouTube video processing
-- astral: Sunrise/sunset calculations
-- tkintermapview: Location selection
-- tzlocal: Timezone handling
-- requests: Network requests
+## Requirements
+
+- Python 3.10 or higher
+- FFmpeg (must be in system PATH)
+- Required Python packages (see requirements.txt)
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details
+This project is licensed under the MIT License - see the LICENSE file for details.
