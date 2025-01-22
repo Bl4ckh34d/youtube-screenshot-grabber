@@ -36,10 +36,15 @@ class Scheduler:
         self._only_sunsets = only_sunsets
         self._schedule_enabled = schedule_enabled
         
+        logger.info(f"Starting scheduler with: schedule_enabled={schedule_enabled}, " +
+                   f"location={'set' if location else 'not set'}, " +
+                   f"time_window={time_window}min, only_sunsets={only_sunsets}")
+        
         if not self._thread or not self._thread.is_alive():
             self._running = True
             self._thread = threading.Thread(target=self._run, daemon=True)
             self._thread.start()
+            logger.info("Scheduler thread started")
             logger.info("Scheduler started")
 
     def stop(self) -> None:
@@ -77,9 +82,11 @@ class Scheduler:
     def _should_capture(self) -> bool:
         """Determine if a capture should be made now."""
         if not self._schedule_enabled:
+            logger.debug("Schedule disabled, capturing")
             return True  # If scheduling is disabled, always capture
             
         if not self._location:
+            logger.warning("No location set but schedule enabled - defaulting to always capture")
             return True  # If no location set, always capture
             
         should_capture, event = is_near_sunset_or_sunrise(
@@ -90,6 +97,8 @@ class Scheduler:
         
         if should_capture:
             logger.info(f"Capture triggered by {event}")
+        else:
+            logger.debug("Not in capture window")
         
         return should_capture
 

@@ -70,28 +70,33 @@ def get_windows_location() -> Optional[Dict[str, float]]:
 
 def get_location_info(lat: float, lon: float, name: str = "") -> LocationInfo:
     """Create LocationInfo object from coordinates."""
+    # Use Asia/Singapore timezone for +8 offset
     return LocationInfo(
         name or f"{lat}, {lon}",
         "Region",
-        "Etc/GMT",  # We'll calculate the actual timezone offset
+        "Asia/Singapore",  # Timezone for +8 offset
         lat,
         lon
     )
 
 def get_sun_times(location: LocationInfo, date: Optional[datetime] = None) -> Dict[str, datetime]:
     """Get sunrise and sunset times for the location."""
-    date = date or datetime.now(pytz.UTC)
+    # Use local time for calculations
+    local_tz = pytz.timezone('Asia/Singapore')
+    date = date or datetime.now(local_tz)
     if date.tzinfo is None:
-        date = pytz.UTC.localize(date)
+        date = local_tz.localize(date)
+    
     try:
         s = sun(location.observer, date=date)
+        # Convert times to local timezone
         return {
-            'sunrise': s['sunrise'],
-            'sunset': s['sunset']
+            'sunrise': s['sunrise'].astimezone(local_tz),
+            'sunset': s['sunset'].astimezone(local_tz)
         }
     except Exception as e:
         logger.error(f"Error getting sun times: {e}")
-        # Return default times in UTC
+        # Return default times in local timezone
         default_date = date.replace(hour=6, minute=0, second=0, microsecond=0)
         return {
             'sunrise': default_date,
@@ -102,13 +107,20 @@ def is_near_sunset_or_sunrise(location: LocationInfo,
                             time_window: int = 30,
                             only_sunsets: bool = False) -> Tuple[bool, str]:
     """Check if current time is near sunset or sunrise."""
-    now = datetime.now(pytz.UTC)
+    local_tz = pytz.timezone('Asia/Singapore')
+    now = datetime.now(local_tz)
     sun_times = get_sun_times(location)
     window = timedelta(minutes=time_window)
+    
+    logger.info(f"Current time (local): {now}")
+    logger.info(f"Sunset time (local): {sun_times['sunset']}")
+    logger.info(f"Time window: {time_window} minutes")
     
     # Check sunset
     sunset_start = sun_times['sunset'] - window
     sunset_end = sun_times['sunset'] + window
+    logger.info(f"Sunset window: {sunset_start} to {sunset_end}")
+    
     if sunset_start <= now <= sunset_end:
         return True, "sunset"
     
@@ -116,6 +128,7 @@ def is_near_sunset_or_sunrise(location: LocationInfo,
     if not only_sunsets:
         sunrise_start = sun_times['sunrise'] - window
         sunrise_end = sun_times['sunrise'] + window
+        logger.info(f"Sunrise window: {sunrise_start} to {sunrise_end}")
         if sunrise_start <= now <= sunrise_end:
             return True, "sunrise"
     
