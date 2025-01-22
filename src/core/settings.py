@@ -2,12 +2,17 @@ import json
 import os
 import logging
 from typing import Dict, Any
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Get the project root directory
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+CONFIG_PATH = os.path.join(PROJECT_ROOT, 'config.json')
+
 DEFAULT_SETTINGS = {
     'youtube_url': '',
-    'output_path': '',
+    'output_path': 'screenshots',
     'interval': 60,  # seconds
     'resolution': '1080p',
     'location': {
@@ -21,7 +26,7 @@ DEFAULT_SETTINGS = {
 }
 
 class Settings:
-    def __init__(self, config_file: str = 'config.json'):
+    def __init__(self, config_file: str = CONFIG_PATH):
         """Initialize settings manager."""
         self.config_file = config_file
         self._settings = self.load()

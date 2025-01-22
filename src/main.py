@@ -27,11 +27,15 @@ class App:
         self.scheduler = Scheduler()
         self._validation_thread = None
         
-        # Initialize with Windows location if available
-        windows_location = get_windows_location()
-        if windows_location:
-            logger.info(f"Got Windows location: {windows_location}")
-            self.settings.update({'location': windows_location})
+        # Only use Windows location if no location is saved
+        saved_location = self.settings.get('location', {})
+        if (saved_location.get('latitude') == 0 and saved_location.get('longitude') == 0):
+            windows_location = get_windows_location()
+            if windows_location:
+                logger.info(f"No saved location found. Using Windows location: {windows_location}")
+                self.settings.update({'location': windows_location})
+        else:
+            logger.info(f"Using saved location: {saved_location}")
         
         # Create system tray with callbacks
         self.system_tray = SystemTray(
