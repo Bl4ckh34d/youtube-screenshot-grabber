@@ -6,6 +6,7 @@ from typing import Optional, Callable
 from astral import LocationInfo
 
 from .location import is_near_sunset_or_sunrise
+from .settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -16,29 +17,36 @@ class Scheduler:
         self._paused = False
         self._thread: Optional[threading.Thread] = None
         self._callback: Optional[Callable] = None
-        self._interval = 60  # seconds
+        self._settings = Settings()
+        self._interval = self._settings._settings.get('interval', 60)  # seconds
         self._location: Optional[LocationInfo] = None
         self._time_window = 30  # minutes
         self._only_sunsets = False
+        self._only_sunrises = False
         self._schedule_enabled = False
 
     def start(self, callback: Callable,
-             interval: int = 60,
+             interval: Optional[int] = None,
              location: Optional[LocationInfo] = None,
              time_window: int = 30,
              only_sunsets: bool = False,
+             only_sunrises: bool = False,
              schedule_enabled: bool = False) -> None:
         """Start the scheduler with given parameters."""
         self._callback = callback
-        self._interval = interval
+        if interval is not None:  # Allow interval override but default to settings
+            self._interval = interval
         self._location = location
         self._time_window = time_window
         self._only_sunsets = only_sunsets
+        self._only_sunrises = only_sunrises
         self._schedule_enabled = schedule_enabled
         
         logger.info(f"Starting scheduler with: schedule_enabled={schedule_enabled}, " +
                    f"location={'set' if location else 'not set'}, " +
-                   f"time_window={time_window}min, only_sunsets={only_sunsets}")
+                   f"time_window={time_window}min, only_sunsets={only_sunsets}, " +
+                   f"only_sunrises={only_sunrises}, " +
+                   f"check_interval={self._interval}s")
         
         if not self._thread or not self._thread.is_alive():
             self._running = True
@@ -75,6 +83,8 @@ class Scheduler:
             self._time_window = kwargs['time_window']
         if 'only_sunsets' in kwargs:
             self._only_sunsets = kwargs['only_sunsets']
+        if 'only_sunrises' in kwargs:
+            self._only_sunrises = kwargs['only_sunrises']
         if 'schedule_enabled' in kwargs:
             self._schedule_enabled = kwargs['schedule_enabled']
         logger.info("Scheduler settings updated")
@@ -92,7 +102,8 @@ class Scheduler:
         should_capture, event = is_near_sunset_or_sunrise(
             self._location,
             self._time_window,
-            self._only_sunsets
+            self._only_sunsets,
+            self._only_sunrises
         )
         
         if should_capture:

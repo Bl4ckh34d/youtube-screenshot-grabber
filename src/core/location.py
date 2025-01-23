@@ -105,31 +105,76 @@ def get_sun_times(location: LocationInfo, date: Optional[datetime] = None) -> Di
 
 def is_near_sunset_or_sunrise(location: LocationInfo, 
                             time_window: int = 30,
-                            only_sunsets: bool = False) -> Tuple[bool, str]:
-    """Check if current time is near sunset or sunrise."""
+                            only_sunsets: bool = False,
+                            only_sunrises: bool = False) -> Tuple[bool, str]:
+    """Check if current time is near sunset or sunrise.
+    
+    Args:
+        location: LocationInfo object containing location details
+        time_window: Minutes before and after sun event to check
+        only_sunsets: If True, only check sunset times
+        only_sunrises: If True, only check sunrise times
+        If both only_sunsets and only_sunrises are False, check both events
+    """
+    # Validate settings - if both are True, treat as "both" mode
+    if only_sunsets and only_sunrises:
+        logger.warning("Both only_sunsets and only_sunrises are True - defaulting to checking both")
+        only_sunsets = False
+        only_sunrises = False
+    
     local_tz = pytz.timezone('Asia/Singapore')
     now = datetime.now(local_tz)
+    
+    # Get today's sun times
     sun_times = get_sun_times(location)
+    
+    # Get tomorrow's sun times if we're near midnight
+    tomorrow_sun_times = get_sun_times(location, now + timedelta(days=1))
+    
+    # Get yesterday's sun times if we're near midnight
+    yesterday_sun_times = get_sun_times(location, now - timedelta(days=1))
+    
     window = timedelta(minutes=time_window)
     
-    logger.info(f"Current time (local): {now}")
-    logger.info(f"Sunset time (local): {sun_times['sunset']}")
+    logger.info(f"Time check at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    logger.info(f"Yesterday's sunset: {yesterday_sun_times['sunset'].strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    logger.info(f"Today's sunrise: {sun_times['sunrise'].strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    logger.info(f"Today's sunset: {sun_times['sunset'].strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    logger.info(f"Tomorrow's sunrise: {tomorrow_sun_times['sunrise'].strftime('%Y-%m-%d %H:%M:%S %Z')}")
     logger.info(f"Time window: {time_window} minutes")
+    logger.info(f"Mode: {'Sunset only' if only_sunsets else 'Sunrise only' if only_sunrises else 'Sunrise & Sunset'}")
     
-    # Check sunset
-    sunset_start = sun_times['sunset'] - window
-    sunset_end = sun_times['sunset'] + window
-    logger.info(f"Sunset window: {sunset_start} to {sunset_end}")
+    # Check sunrise if in sunrise-only mode or both mode
+    if only_sunrises or (not only_sunsets and not only_sunrises):
+        sunrise_windows = [
+            (sun_times['sunrise'], "today's sunrise"),
+            (tomorrow_sun_times['sunrise'], "tomorrow's sunrise"),
+        ]
+        
+        for sunrise_time, desc in sunrise_windows:
+            sunrise_start = sunrise_time - window
+            sunrise_end = sunrise_time + window
+            logger.debug(f"Checking {desc} window: {sunrise_start.strftime('%H:%M:%S')} to {sunrise_end.strftime('%H:%M:%S')}")
+            
+            if sunrise_start <= now <= sunrise_end:
+                logger.info(f"Within {desc} window")
+                return True, "sunrise"
     
-    if sunset_start <= now <= sunset_end:
-        return True, "sunset"
+    # Check sunset if in sunset-only mode or both mode
+    if only_sunsets or (not only_sunsets and not only_sunrises):
+        sunset_windows = [
+            (yesterday_sun_times['sunset'], "yesterday's sunset"),
+            (sun_times['sunset'], "today's sunset"),
+        ]
+        
+        for sunset_time, desc in sunset_windows:
+            sunset_start = sunset_time - window
+            sunset_end = sunset_time + window
+            logger.debug(f"Checking {desc} window: {sunset_start.strftime('%H:%M:%S')} to {sunset_end.strftime('%H:%M:%S')}")
+            
+            if sunset_start <= now <= sunset_end:
+                logger.info(f"Within {desc} window")
+                return True, "sunset"
     
-    # Check sunrise if not only looking for sunsets
-    if not only_sunsets:
-        sunrise_start = sun_times['sunrise'] - window
-        sunrise_end = sun_times['sunrise'] + window
-        logger.info(f"Sunrise window: {sunrise_start} to {sunrise_end}")
-        if sunrise_start <= now <= sunrise_end:
-            return True, "sunrise"
-    
+    logger.debug("Not within any capture windows")
     return False, ""

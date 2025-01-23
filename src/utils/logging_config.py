@@ -7,7 +7,7 @@ def setup_logging():
     logging.getLogger('PIL').setLevel(logging.INFO)
     
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
         handlers=[
             logging.StreamHandler(sys.stdout)

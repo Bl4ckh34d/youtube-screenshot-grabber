@@ -11,7 +11,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 CONFIG_PATH = os.path.join(PROJECT_ROOT, 'config.json')
 
 DEFAULT_SETTINGS = {
-    'youtube_url': '',
+    'youtube_urls': [],  # List of YouTube URLs to capture
     'output_path': 'screenshots',
     'interval': 60,  # seconds
     'resolution': '1080p',
@@ -22,7 +22,8 @@ DEFAULT_SETTINGS = {
     },
     'schedule_enabled': False,
     'time_window': 30,  # minutes
-    'only_sunsets': False
+    'only_sunsets': False,
+    'only_sunrises': False
 }
 
 class Settings:
