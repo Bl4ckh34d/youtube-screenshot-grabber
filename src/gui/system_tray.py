@@ -4,6 +4,8 @@ from PIL import Image, ImageDraw
 from typing import Dict, Any, Optional, Callable
 import tkinter as tk
 from tkinter import filedialog
+import os
+from pathlib import Path
 
 from .location_dialog import LocationDialog
 from .url_dialog import URLDialog
@@ -19,7 +21,21 @@ class SystemTray:
         self._paused = False
         
     def create_icon(self) -> Image:
-        """Create a camera icon."""
+        """Load the icon from assets folder."""
+        # Get the path to the icon file
+        src_dir = Path(__file__).parent.parent
+        icon_path = os.path.join(src_dir, 'assets', 'icon.png')
+        
+        try:
+            # Open and return the icon image
+            return Image.open(icon_path)
+        except Exception as e:
+            logger.error(f"Failed to load icon from {icon_path}: {e}")
+            # Fall back to creating a basic icon if loading fails
+            return self._create_fallback_icon()
+            
+    def _create_fallback_icon(self) -> Image:
+        """Create a basic camera icon as fallback."""
         # Create a new image with a black background
         width = 64
         height = 64
