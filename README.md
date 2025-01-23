@@ -53,12 +53,14 @@ pip install -r requirements.txt
 
 1. Run the application:
 ```bash
-python -m src.main
+python src/main.py
 ```
 
-2. The application will appear in your system tray
+2. For silent startup (no console window), you can:
+   - Double-click `Start-Silent.vbs` in the project folder
+   - Add `Start-Silent.vbs` to your Windows startup folder (Press Win+R, type `shell:startup`, and copy the script there)
 
-3. Right-click the tray icon to:
+3. Once running, the application will appear in your system tray. Right-click the tray icon to:
    - Set YouTube URL
    - Configure capture interval
    - Set output directory

@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New "Only Sunrise" capture mode option
 - More comprehensive logging of settings and capture times
 - Improved settings synchronization between components
+- Documentation for silent startup using Start-Silent.vbs
 
 ### Changed
 - Replaced binary sunset toggle with three-state capture mode selection (Both/Sunrise/Sunset)
