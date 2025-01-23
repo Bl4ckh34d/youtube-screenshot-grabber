@@ -11,19 +11,19 @@ from .settings import Settings
 logger = logging.getLogger(__name__)
 
 class Scheduler:
-    def __init__(self):
+    def __init__(self, settings: Optional[Settings] = None):
         """Initialize scheduler."""
         self._running = False
         self._paused = False
         self._thread: Optional[threading.Thread] = None
         self._callback: Optional[Callable] = None
-        self._settings = Settings()
-        self._interval = self._settings._settings.get('interval', 60)  # seconds
+        self._settings = settings if settings is not None else Settings()
+        self._interval = self._settings.get('interval', 60)  # seconds
         self._location: Optional[LocationInfo] = None
-        self._time_window = 30  # minutes
-        self._only_sunsets = False
-        self._only_sunrises = False
-        self._schedule_enabled = False
+        self._time_window = self._settings.get('time_window', 30)  # minutes
+        self._only_sunsets = self._settings.get('only_sunsets', False)
+        self._only_sunrises = self._settings.get('only_sunrises', False)
+        self._schedule_enabled = self._settings.get('schedule_enabled', False)
 
     def start(self, callback: Callable,
              interval: Optional[int] = None,
@@ -77,16 +77,21 @@ class Scheduler:
         """Update scheduler settings."""
         if 'interval' in kwargs:
             self._interval = kwargs['interval']
+            self._settings.set('interval', kwargs['interval'])
         if 'location' in kwargs:
             self._location = kwargs['location']
         if 'time_window' in kwargs:
             self._time_window = kwargs['time_window']
+            self._settings.set('time_window', kwargs['time_window'])
         if 'only_sunsets' in kwargs:
             self._only_sunsets = kwargs['only_sunsets']
+            self._settings.set('only_sunsets', kwargs['only_sunsets'])
         if 'only_sunrises' in kwargs:
             self._only_sunrises = kwargs['only_sunrises']
+            self._settings.set('only_sunrises', kwargs['only_sunrises'])
         if 'schedule_enabled' in kwargs:
             self._schedule_enabled = kwargs['schedule_enabled']
+            self._settings.set('schedule_enabled', kwargs['schedule_enabled'])
         logger.info("Scheduler settings updated")
 
     def _should_capture(self) -> bool:
@@ -101,9 +106,7 @@ class Scheduler:
             
         should_capture, event = is_near_sunset_or_sunrise(
             self._location,
-            self._time_window,
-            self._only_sunsets,
-            self._only_sunrises
+            self._settings
         )
         
         if should_capture:

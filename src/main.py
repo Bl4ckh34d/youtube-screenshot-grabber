@@ -31,7 +31,7 @@ class App:
         self.settings = Settings()
         self.screenshot = ScreenshotCapture()
         self.stream_manager = StreamManager()
-        self.scheduler = Scheduler()
+        self.scheduler = Scheduler(settings=self.settings)
         self._validation_thread = None
         self._total_screenshots = 0  # Counter for total screenshots since app start
         
@@ -56,7 +56,7 @@ class App:
                 'set_time_window': self.set_time_window,
                 'set_output_path': self.set_output_path,
                 'toggle_schedule': self.toggle_schedule,
-                'toggle_only_sunsets': self.toggle_only_sunsets,
+                'toggle_capture_mode': self.toggle_capture_mode,
                 'toggle_pause': self.toggle_pause,
                 'quit': self.quit
             }
@@ -178,11 +178,22 @@ class App:
         self.scheduler.update_settings(schedule_enabled=enabled)
         self.system_tray.update_settings(self.settings.all)
 
-    def toggle_only_sunsets(self) -> None:
-        """Toggle only sunsets state."""
-        only_sunsets = not self.settings.get('only_sunsets', False)
-        self.settings.set('only_sunsets', only_sunsets)
-        self.scheduler.update_settings(only_sunsets=only_sunsets)
+    def toggle_capture_mode(self, mode: str) -> None:
+        """Toggle between different capture modes (both, sunrise, sunset)."""
+        if mode == 'both':
+            self.settings.set('only_sunsets', False)
+            self.settings.set('only_sunrises', False)
+        elif mode == 'sunrise':
+            self.settings.set('only_sunsets', False)
+            self.settings.set('only_sunrises', True)
+        elif mode == 'sunset':
+            self.settings.set('only_sunsets', True)
+            self.settings.set('only_sunrises', False)
+            
+        self.scheduler.update_settings(
+            only_sunsets=self.settings.get('only_sunsets', False),
+            only_sunrises=self.settings.get('only_sunrises', False)
+        )
         self.system_tray.update_settings(self.settings.all)
 
     def toggle_pause(self) -> None:
@@ -229,6 +240,7 @@ class App:
             location=location_info,
             time_window=time_window,
             only_sunsets=bool(self.settings.get('only_sunsets', False)),
+            only_sunrises=bool(self.settings.get('only_sunrises', False)),
             schedule_enabled=bool(self.settings.get('schedule_enabled', False))
         )
     

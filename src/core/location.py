@@ -103,19 +103,17 @@ def get_sun_times(location: LocationInfo, date: Optional[datetime] = None) -> Di
             'sunset': default_date.replace(hour=18)
         }
 
-def is_near_sunset_or_sunrise(location: LocationInfo, 
-                            time_window: int = 30,
-                            only_sunsets: bool = False,
-                            only_sunrises: bool = False) -> Tuple[bool, str]:
+def is_near_sunset_or_sunrise(location: LocationInfo, settings: Dict) -> Tuple[bool, str]:
     """Check if current time is near sunset or sunrise.
     
     Args:
         location: LocationInfo object containing location details
-        time_window: Minutes before and after sun event to check
-        only_sunsets: If True, only check sunset times
-        only_sunrises: If True, only check sunrise times
-        If both only_sunsets and only_sunrises are False, check both events
+        settings: Settings object containing all program settings
     """
+    time_window = settings.get('time_window', 30)
+    only_sunsets = settings.get('only_sunsets', False)
+    only_sunrises = settings.get('only_sunrises', False)
+
     # Validate settings - if both are True, treat as "both" mode
     if only_sunsets and only_sunrises:
         logger.warning("Both only_sunsets and only_sunrises are True - defaulting to checking both")
@@ -135,13 +133,14 @@ def is_near_sunset_or_sunrise(location: LocationInfo,
     yesterday_sun_times = get_sun_times(location, now - timedelta(days=1))
     
     window = timedelta(minutes=time_window)
-    
-    logger.info(f"Time check at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
-    logger.info(f"Yesterday's sunset: {yesterday_sun_times['sunset'].strftime('%Y-%m-%d %H:%M:%S %Z')}")
-    logger.info(f"Today's sunrise: {sun_times['sunrise'].strftime('%Y-%m-%d %H:%M:%S %Z')}")
-    logger.info(f"Today's sunset: {sun_times['sunset'].strftime('%Y-%m-%d %H:%M:%S %Z')}")
-    logger.info(f"Tomorrow's sunrise: {tomorrow_sun_times['sunrise'].strftime('%Y-%m-%d %H:%M:%S %Z')}")
-    logger.info(f"Time window: {time_window} minutes")
+    logger.info("------------- Self-Checking Schedule: ------------")
+    logger.info(f"Sunset:  {yesterday_sun_times['sunset'].strftime('%d.%m.%Y %H:%M:%S (%Z)')}")
+    logger.info(f"Sunrise: {sun_times['sunrise'].strftime('%d.%m.%Y %H:%M:%S (%Z)')}")
+    logger.info(f"Sunset:  {sun_times['sunset'].strftime('%d.%m.%Y %H:%M:%S (%Z)')}")
+    logger.info(f"Sunrise: {tomorrow_sun_times['sunrise'].strftime('%d.%m.%Y %H:%M:%S (%Z)')}")
+    logger.info(f"---------------- Current Settings: ----------------")
+    logger.info(f"Capture interval: {settings.get('interval', 60)} seconds | Schedule enabled: {settings.get('schedule_enabled', False)}")
+    logger.info(f"Time window:      {time_window} minutes | Resolution: {settings.get('resolution', '1080p')}")
     logger.info(f"Mode: {'Sunset only' if only_sunsets else 'Sunrise only' if only_sunrises else 'Sunrise & Sunset'}")
     
     # Check sunrise if in sunrise-only mode or both mode

@@ -174,15 +174,21 @@ class SystemTray:
                 "Capture Mode",
                 pystray.Menu(
                     pystray.MenuItem(
-                        "Capture Both Sunrise and Sunset",
-                        action=lambda _: self.callbacks['toggle_only_sunsets'](),
-                        checked=lambda item: not self.settings.get('only_sunsets', False),
+                        "Sunrise and Sunset",
+                        action=lambda _: self.callbacks['toggle_capture_mode']('both'),
+                        checked=lambda item: not self.settings.get('only_sunsets', False) and not self.settings.get('only_sunrises', False),
                         radio=True
                     ),
                     pystray.MenuItem(
-                        "Capture Only Sunset",
-                        action=lambda _: self.callbacks['toggle_only_sunsets'](),
-                        checked=lambda item: self.settings.get('only_sunsets', False),
+                        "Only Sunrise",
+                        action=lambda _: self.callbacks['toggle_capture_mode']('sunrise'),
+                        checked=lambda item: not self.settings.get('only_sunsets', False) and self.settings.get('only_sunrises', False),
+                        radio=True
+                    ),
+                    pystray.MenuItem(
+                        "Only Sunset",
+                        action=lambda _: self.callbacks['toggle_capture_mode']('sunset'),
+                        checked=lambda item: self.settings.get('only_sunsets', False) and not self.settings.get('only_sunrises', False),
                         radio=True
                     )
                 )
