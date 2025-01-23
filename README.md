@@ -12,6 +12,8 @@ A Python application that captures screenshots from YouTube livestreams at regul
 - Location-based sunset/sunrise scheduling
 - Pause/resume functionality
 
+For a detailed list of changes and updates, please see our [Changelog](CHANGELOG.md).
+
 ## Project Structure
 
 ```
