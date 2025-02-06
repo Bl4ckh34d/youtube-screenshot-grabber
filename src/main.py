@@ -32,6 +32,7 @@ class App:
         self.screenshot = ScreenshotCapture()
         self.stream_manager = StreamManager()
         self.scheduler = Scheduler(settings=self.settings)
+        self.scheduler._app = self
         self._validation_thread = None
         
         # Only use Windows location if no location is saved
@@ -57,7 +58,8 @@ class App:
                 'toggle_schedule': self.toggle_schedule,
                 'toggle_capture_mode': self.toggle_capture_mode,
                 'toggle_pause': self.toggle_pause,
-                'quit': self.quit
+                'quit': self.quit,
+                'get_current_settings': lambda: self.settings.all
             }
         )
         
@@ -66,66 +68,12 @@ class App:
             self.start_screenshot_thread()
     
     def set_youtube_urls(self, urls: List[str], valid_urls: List[str] = None) -> None:
-        """Set YouTube URLs and handle validation."""
-        # If we received initial URLs (from dialog)
-        if not valid_urls:
-            logger.debug(f"Starting parallel URL validation for {len(urls)} URLs")
-            # Pause screenshot taking
-            self.scheduler.pause()
-            self.system_tray.set_paused(True)
-            
-            # Store unvalidated URLs temporarily
-            self.settings.set('pending_urls', urls)
-            
-            # Start validation in background
-            def validate_urls():
-                valid_urls = []
-                validated_queue = queue.Queue()
-                resolution = self.settings.get('resolution', '1080p')
-                
-                def validate_single_url(url: str):
-                    """Validate a single URL and add to queue if valid."""
-                    logger.debug(f"Starting validation of URL: {url}")
-                    if self._is_valid_youtube_url(url):
-                        logger.debug(f"URL has valid YouTube domain: {url}")
-                        try:
-                            with yt_dlp.YoutubeDL(self.screenshot.ydl_opts) as ydl:
-                                info = ydl.extract_info(url, download=False)
-                                logger.debug(f"Successfully extracted info for URL: {url} (Title: {info.get('title', 'Unknown')})")
-                                validated_queue.put(url)
-                                valid_urls.append(url)
-                                # Start prefetching for this URL immediately
-                                logger.debug(f"Starting immediate prefetch for validated URL: {url}")
-                                self.screenshot.prefetch_stream_info([url], resolution)
-                        except Exception as e:
-                            logger.warning(f"Invalid stream URL {url}: {str(e)}")
-                    else:
-                        logger.warning(f"Invalid YouTube domain for URL: {url}")
+        # We don't bother with the concurrency validation
+        self.settings.set('youtube_urls', urls)
+        self.stream_manager.stop_all()
+        # Start them again
+        self.start_screenshot_thread()
 
-                # Use ThreadPoolExecutor for parallel validation
-                with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(urls), 50)) as executor:
-                    logger.debug(f"Created thread pool with {min(len(urls), 50)} workers")
-                    # Submit all validation tasks
-                    futures = [executor.submit(validate_single_url, url) for url in urls]
-                    # Wait for all to complete
-                    concurrent.futures.wait(futures)
-                
-                # Update settings with all validated URLs
-                self.settings.set('youtube_urls', valid_urls)
-                self.settings.set('pending_urls', None)
-                
-                logger.info(f"URL validation complete. {len(valid_urls)} valid URLs found out of {len(urls)} total")
-                # Note: User must manually resume via system tray
-            
-            self._validation_thread = threading.Thread(target=validate_urls, daemon=True)
-            self._validation_thread.start()
-            logger.debug("Started validation thread")
-        
-        # If we received validated URLs (from validation process)
-        else:
-            logger.debug(f"Received {len(valid_urls)} pre-validated URLs")
-            self.settings.set('youtube_urls', valid_urls)
-            self.start_screenshot_thread()
     
     def _is_valid_youtube_url(self, url: str) -> bool:
         """Check if the URL is a valid YouTube URL."""
@@ -213,10 +161,15 @@ class App:
     
     def quit(self) -> None:
         """Quit the application."""
+        logger.info("Quitting application...")
+
+        # 1. Stop scheduler
         self.scheduler.stop()
+        
+        # 2. Stop all stream processes
         self.stream_manager.stop_all()
-        if self.system_tray.icon:
-            self.system_tray.icon.stop()
+        
+        os._exit(0)  # Hard kill
     
     def start_screenshot_thread(self) -> None:
         """Start or restart the screenshot thread."""
@@ -269,14 +222,21 @@ class App:
             current_urls = set(self.stream_manager.streams.keys())
             new_urls = set(urls)
             
-            # Remove streams that are no longer in the URL list
+            # Remove streams no longer needed
             for url in current_urls - new_urls:
                 self.stream_manager.remove_stream(url)
             
-            # Add new streams
+            # Add new streams (inherit paused state from the scheduler)
+            is_paused = self.scheduler._paused
             for url in new_urls - current_urls:
-                self.stream_manager.add_stream(url, output_path, interval, resolution)
-            
+                self.stream_manager.add_stream(
+                    url=url,
+                    output_path=output_path,
+                    interval=interval,
+                    resolution=resolution,
+                    paused=is_paused
+                )
+        
         except Exception as e:
             logger.error(f"Error managing screenshot processes: {str(e)}")
             

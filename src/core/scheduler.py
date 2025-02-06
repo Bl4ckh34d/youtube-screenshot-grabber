@@ -123,14 +123,68 @@ class Scheduler:
     def _run(self) -> None:
         """Main scheduler loop."""
         while self._running:
-            if self._callback and self._should_capture():
-                try:
-                    self._callback()
-                except Exception as e:
-                    logger.error(f"Error in scheduler callback: {e}")
-            
-            # Sleep for the interval
+            try:
+                self._manage_processes()
+            except Exception as e:
+                logger.error(f"Error in scheduler loop: {e}")
+
+            # Now sleep for the interval
             for _ in range(self._interval):
                 if not self._running:
                     break
                 time.sleep(1)
+        
+        logger.info("Scheduler thread exiting")
+
+    def _manage_processes(self) -> None:
+        """
+        Decide whether to start or kill processes based on scheduling, 
+        pause state, and the capture window.
+        """
+        # 1. If paused, do nothing. (Alternatively, you could kill processes if you prefer.)
+        if self._paused:
+            logger.debug("Scheduler is paused, not starting or killing processes.")
+            return
+
+        # 2. If scheduling is enabled, check if we're near sunrise or sunset.
+        if self._schedule_enabled:
+            if self._location is None:
+                # No location => we can't check sunrise/sunset times. 
+                # Decide how you want to handle this. Let's default to "always kill" or "always run."
+                logger.warning("Scheduling is enabled but no location set. Defaulting to always run processes.")
+                self._start_processes_for_all_urls()
+                return
+            
+            # Check if we're near sunrise/sunset
+            in_window, _ = self._is_in_time_window()
+            if in_window:
+                logger.debug("We are in the capture window (sunrise/sunset). Ensuring processes run.")
+                self._start_processes_for_all_urls()
+            else:
+                logger.debug("Outside capture window. Killing processes.")
+                self._app.stream_manager.stop_all()  # Must have a reference to `App` or pass it in
+        else:
+            # 3. Scheduling is disabled => always ensure processes run
+            logger.debug("Scheduling disabled. Ensuring processes run.")
+            self._start_processes_for_all_urls()
+
+    def _is_in_time_window(self) -> (bool, str):
+        """
+        Returns a tuple (is_in_window, event_type)
+        where event_type is 'sunrise'/'sunset' or ''.
+        """
+        from .location import is_near_sunset_or_sunrise
+        return is_near_sunset_or_sunrise(self._location, self._settings.all)
+
+    def _start_processes_for_all_urls(self):
+        """
+        A convenience method to call the main app’s capture_screenshot,
+        which handles adding streams for new URLs, etc.
+        """
+        try:
+            self._app.capture_screenshot()
+        except Exception as e:
+            logger.error(f"Error starting processes: {e}")
+
+    
+

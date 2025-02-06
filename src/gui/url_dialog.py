@@ -13,7 +13,10 @@ class URLDialog:
         self.window = ctk.CTkToplevel(parent) if parent else ctk.CTk()
         self.window.title("Set YouTube URLs")
         self.window.geometry("600x300")  # Made taller for status messages
-        self.window.grab_set()  # Make dialog modal
+        try:
+            self.window.grab_set()  # Make dialog modal
+        except TclError as e:
+            logger.warning(f"grab_set failed (another window may have the grab). Ignoring. {e}")
         
         self.settings = settings or {}
         self.on_save = on_save

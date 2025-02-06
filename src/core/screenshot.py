@@ -274,7 +274,6 @@ class StreamProcess:
         logger.info(f"Started capture process for {self.url}")
 
     def stop(self):
-        """Stop the stream capture process."""
         if self.stop_event:
             self.stop_event.set()
         if self.process:
@@ -289,18 +288,26 @@ class StreamManager:
     def __init__(self):
         self.streams: Dict[str, StreamProcess] = {}
 
-    def add_stream(self, url: str, output_path: str, interval: int, resolution: str = '1080p'):
+    def add_stream(self, url: str, output_path: str, interval: int,
+               resolution: str = '1080p', paused: bool = False):
         """Add and start a new stream capture process."""
         if url in self.streams:
             self.remove_stream(url)
+        
         stream_process = StreamProcess(url, output_path, interval, resolution)
-        stream_process.start()
         self.streams[url] = stream_process
+        
+        # Start the process
+        stream_process.start()
+        
+        # If we are paused, immediately pause the new process.
+        if paused:
+            stream_process.pause()
 
     def remove_stream(self, url: str):
         """Stop and remove a stream capture process."""
         if url in self.streams:
-            self.streams[url].stop()
+            self.streams[url].stop()  # calls StreamProcess.stop()
             del self.streams[url]
 
     def update_interval(self, interval: int):

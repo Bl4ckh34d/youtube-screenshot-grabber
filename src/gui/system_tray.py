@@ -183,14 +183,14 @@ class SystemTray:
             pystray.MenuItem(
                 "Set YouTube URL",
                 action=lambda _: URLDialog(
-                    settings=self.settings,
+                    settings=self.callbacks['get_current_settings'](),  # returns app.settings.all
                     on_save=self.callbacks['set_youtube_url']
                 ).run()
             ),
             pystray.MenuItem(
                 "Set Location",
                 action=lambda _: LocationDialog(
-                    settings=self.settings,
+                    settings=self.callbacks['get_current_settings'](),  # returns app.settings.all
                     on_save=self.callbacks['set_location']
                 ).run()
             ),
