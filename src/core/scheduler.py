@@ -24,6 +24,8 @@ class Scheduler:
         self._only_sunsets = self._settings.get('only_sunsets', False)
         self._only_sunrises = self._settings.get('only_sunrises', False)
         self._schedule_enabled = self._settings.get('schedule_enabled', False)
+        self._was_in_window = False  # track previous state
+        self._current_event_type = ""  # track which event we are capturing
 
     def start(self, callback: Callable,
              interval: Optional[int] = None,
@@ -137,36 +139,50 @@ class Scheduler:
         logger.info("Scheduler thread exiting")
 
     def _manage_processes(self) -> None:
-        """
-        Decide whether to start or kill processes based on scheduling, 
-        pause state, and the capture window.
-        """
-        # 1. If paused, do nothing. (Alternatively, you could kill processes if you prefer.)
+        """Decide whether to start or kill processes based on scheduling, pause state, etc."""
         if self._paused:
             logger.debug("Scheduler is paused, not starting or killing processes.")
             return
 
-        # 2. If scheduling is enabled, check if we're near sunrise or sunset.
         if self._schedule_enabled:
-            if self._location is None:
-                # No location => we can't check sunrise/sunset times. 
-                # Decide how you want to handle this. Let's default to "always kill" or "always run."
+            if not self._location:
                 logger.warning("Scheduling is enabled but no location set. Defaulting to always run processes.")
-                self._start_processes_for_all_urls()
+                self._start_processes_for_all_urls("", force=True)  # no event type
+                self._was_in_window = True
                 return
             
-            # Check if we're near sunrise/sunset
-            in_window, _ = self._is_in_time_window()
+            in_window, event_type = self._is_in_time_window()
             if in_window:
-                logger.debug("We are in the capture window (sunrise/sunset). Ensuring processes run.")
-                self._start_processes_for_all_urls()
+                logger.debug(f"In capture window for {event_type}. Ensuring processes run.")
+                self._start_processes_for_all_urls(event_type)
+                self._was_in_window = True
+                self._current_event_type = event_type
             else:
-                logger.debug("Outside capture window. Killing processes.")
-                self._app.stream_manager.stop_all()  # Must have a reference to `App` or pass it in
+                logger.debug("Outside capture window.")
+                
+                # If we WERE in the window but now are NOT => time to kill processes + convert
+                if self._was_in_window:
+                    logger.debug("We just left the capture window. Stopping processes + auto-convert.")
+                    self._app.stream_manager.stop_all()
+                    
+                    # Now do automatic clip conversion
+                    self._app.convert_subfolders_to_clips_and_cleanup(
+                        self._current_event_type
+                    )
+
+                    # If "shutdown_when_done" is True, shut down system
+                    if self._app.settings.get('shutdown_when_done', False):
+                        logger.info("Shutting down (shutdown_when_done is enabled).")
+                        import os
+                        os.system("shutdown /s /t 0")
+                    
+                self._was_in_window = False
+                self._current_event_type = ""
         else:
-            # 3. Scheduling is disabled => always ensure processes run
+            # scheduling disabled => always run
             logger.debug("Scheduling disabled. Ensuring processes run.")
-            self._start_processes_for_all_urls()
+            self._start_processes_for_all_urls("", force=True)
+            self._was_in_window = True
 
     def _is_in_time_window(self) -> (bool, str):
         """
@@ -176,13 +192,14 @@ class Scheduler:
         from .location import is_near_sunset_or_sunrise
         return is_near_sunset_or_sunrise(self._location, self._settings.all)
 
-    def _start_processes_for_all_urls(self):
+    def _start_processes_for_all_urls(self, event_type: str, force: bool = False):
         """
         A convenience method to call the main app’s capture_screenshot,
-        which handles adding streams for new URLs, etc.
+        optionally passing which event type ("sunrise" or "sunset").
+        If 'force' is True, we do it even if we're not in a window.
         """
         try:
-            self._app.capture_screenshot()
+            self._app.capture_screenshot(event_type=event_type)
         except Exception as e:
             logger.error(f"Error starting processes: {e}")
 

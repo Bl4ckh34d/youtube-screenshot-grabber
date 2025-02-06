@@ -99,34 +99,38 @@ class ScreenshotCapture:
 
         return selected_format
 
-    def capture_screenshot(self, stream_info: Dict[str, Any], output_path: str) -> Optional[str]:
+    def capture_screenshot(self, stream_info: Dict[str, Any], output_path: str, event_type: str = "") -> Optional[str]:
         """Capture a screenshot from the stream."""
         try:
             # Generate output filename with timestamp
             now = datetime.now()
             timestamp = now.strftime('%Y-%m-%d_%H-%M-%S')
-            
-            # Clean the title once, use it for both folder and file
+
+            # Clean the title
             clean_title = self._clean_filename(stream_info['title'])
-            logger.info(f"Title from stream_info: {stream_info['title']}")
-            logger.info(f"Clean title for folder: {clean_title}")
-            
-            # Create stream-specific subdirectory using just the clean title
-            stream_path = os.path.join(output_path, clean_title)
-            logger.debug(f"Creating folder: {stream_path}")
+
+            # Build a folder name including date + event type + stream title
+            date_str = now.strftime('%Y_%m_%d')
+            # e.g. "2025_02_07_Sunrise_MyStreamTitle"
+            folder_name = f"{date_str}"
+            if event_type:
+                # uppercase first letter
+                folder_name += f"_{event_type.capitalize()}"
+            folder_name += f"_{clean_title}"
+
+            stream_path = os.path.join(output_path, folder_name)
             os.makedirs(stream_path, exist_ok=True)
-            
-            # Use timestamp only for the file
+
             filename = f"{timestamp}.jpg"
             full_path = os.path.join(stream_path, filename)
-            
-            # Use ffmpeg to capture frame
+
+            # ffmpeg invocation
             cmd = [
                 'ffmpeg',
-                '-y',  # Overwrite output file
+                '-y',
                 '-i', stream_info['url'],
-                '-vframes', '1',  # Capture one frame
-                '-q:v', '2',  # High quality
+                '-vframes', '1',
+                '-q:v', '2',
                 full_path
             ]
             
@@ -208,11 +212,13 @@ class ScreenshotCapture:
         logger.debug("Started prefetch thread")
 
 class StreamProcess:
-    def __init__(self, url: str, output_path: str, interval: int, resolution: str = '1080p'):
+    def __init__(self, url: str, output_path: str, interval: int, 
+                 resolution: str = '1080p', event_type: str = ""):
         self.url = url
         self.output_path = output_path
         self.interval = interval
         self.resolution = resolution
+        self.event_type = event_type  # store it here
         self.process = None
         self.stop_event = None
         self.screenshot_capture = ScreenshotCapture()
@@ -289,18 +295,16 @@ class StreamManager:
         self.streams: Dict[str, StreamProcess] = {}
 
     def add_stream(self, url: str, output_path: str, interval: int,
-               resolution: str = '1080p', paused: bool = False):
+               resolution: str = '1080p', paused: bool = False, event_type: str = ""):
         """Add and start a new stream capture process."""
         if url in self.streams:
             self.remove_stream(url)
-        
-        stream_process = StreamProcess(url, output_path, interval, resolution)
+
+        stream_process = StreamProcess(url, output_path, interval, resolution, event_type=event_type)
         self.streams[url] = stream_process
-        
-        # Start the process
+
         stream_process.start()
-        
-        # If we are paused, immediately pause the new process.
+
         if paused:
             stream_process.pause()
 

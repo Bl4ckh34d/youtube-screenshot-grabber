@@ -151,6 +151,10 @@ class SystemTray:
             Iterate over each subfolder in 'output_path', combine its images into
             a single MP4 using FFmpeg at 60 fps, then delete the images.
             """
+            # First ensure the capture processes are paused
+            if not self._paused:
+                self.callbacks['toggle_pause']()
+
             if self._converting:
                 return
 
@@ -164,10 +168,8 @@ class SystemTray:
                 self.update_menu()
                 return
 
-            # We'll run the process in a background thread so the GUI remains responsive.
             def monitor_process():
                 try:
-                    # Do the actual conversion (iterating subfolders) in a helper method
                     self._convert_subfolders_to_clips_ffmpeg(output_path)
                 except Exception as e:
                     logger.error(f"Clip conversion error: {e}")
@@ -176,6 +178,10 @@ class SystemTray:
                     self._conversion_process = None
                     self.update_menu()  # Re-enable the menu item
 
+                # Optionally, if you want to *unpause* automatically after conversion:
+                # if self._paused:
+                #     self.callbacks['toggle_pause']()
+
             thread = threading.Thread(target=monitor_process, daemon=True)
             thread.start()
 
@@ -183,14 +189,14 @@ class SystemTray:
             pystray.MenuItem(
                 "Set YouTube URL",
                 action=lambda _: URLDialog(
-                    settings=self.callbacks['get_current_settings'](),  # returns app.settings.all
+                    settings=self.callbacks['get_current_settings'](),
                     on_save=self.callbacks['set_youtube_url']
                 ).run()
             ),
             pystray.MenuItem(
                 "Set Location",
                 action=lambda _: LocationDialog(
-                    settings=self.callbacks['get_current_settings'](),  # returns app.settings.all
+                    settings=self.callbacks['get_current_settings'](),
                     on_save=self.callbacks['set_location']
                 ).run()
             ),
@@ -219,13 +225,15 @@ class SystemTray:
                     pystray.MenuItem(
                         "Only Sunrise",
                         action=lambda _: self.callbacks['toggle_capture_mode']('sunrise'),
-                        checked=lambda item: not self.settings.get('only_sunsets', False) and self.settings.get('only_sunrises', False),
+                        checked=lambda item: (not self.settings.get('only_sunsets', False)
+                                            and self.settings.get('only_sunrises', False)),
                         radio=True
                     ),
                     pystray.MenuItem(
                         "Only Sunset",
                         action=lambda _: self.callbacks['toggle_capture_mode']('sunset'),
-                        checked=lambda item: self.settings.get('only_sunsets', False) and not self.settings.get('only_sunrises', False),
+                        checked=lambda item: (self.settings.get('only_sunsets', False)
+                                            and not self.settings.get('only_sunrises', False)),
                         radio=True
                     )
                 )
@@ -235,6 +243,12 @@ class SystemTray:
                 "Convert to Clips",
                 action=convert_to_clips,
                 enabled=lambda item: not self._converting
+            ),
+            # --- New setting here ---
+            pystray.MenuItem(
+                "Shutdown when done",
+                action=lambda _: self.callbacks['toggle_shutdown_when_done'](),
+                checked=lambda item: self.settings.get('shutdown_when_done', False)
             ),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(
@@ -362,8 +376,7 @@ class SystemTray:
                 except Exception as ex:
                     logger.warning(f"Could not delete file {img_file}: {ex}")
 
-            # (Optional) remove the empty folder
-            # try:
-            #     os.rmdir(folder_path)
-            # except OSError as e:
-            #     logger.warning(f"Could not remove folder {folder_path}: {e}")
+            try:
+                os.rmdir(folder_path)
+            except OSError as e:
+                logger.warning(f"Could not remove folder {folder_path}: {e}")

@@ -59,7 +59,8 @@ class App:
                 'toggle_capture_mode': self.toggle_capture_mode,
                 'toggle_pause': self.toggle_pause,
                 'quit': self.quit,
-                'get_current_settings': lambda: self.settings.all
+                'get_current_settings': lambda: self.settings.all,
+                'toggle_shutdown_when_done': self.toggle_shutdown_when_done
             }
         )
         
@@ -202,41 +203,43 @@ class App:
             schedule_enabled=bool(self.settings.get('schedule_enabled', False))
         )
     
-    def capture_screenshot(self) -> None:
-        """Start or update screenshot capture processes for all configured streams."""
+    def capture_screenshot(self, event_type="") -> Optional[str]:
         try:
             urls = self.settings.get('youtube_urls', [])
             if not urls:
                 logger.warning("No YouTube URLs set")
                 return
-                
+
             output_path = self.settings.get('output_path')
             if not output_path:
                 logger.warning("No output path set")
                 return
-            
+
             interval = int(self.settings.get('interval', 60))
             resolution = self.settings.get('resolution', '1080p')
-            
-            # Get current stream URLs
+
+            # Remove old streams if needed, then add streams for new URLs
             current_urls = set(self.stream_manager.streams.keys())
             new_urls = set(urls)
-            
-            # Remove streams no longer needed
+
+            # Remove any that aren't used
             for url in current_urls - new_urls:
                 self.stream_manager.remove_stream(url)
-            
-            # Add new streams (inherit paused state from the scheduler)
+
+            # Whether everything is paused
             is_paused = self.scheduler._paused
+
+            # Add new streams (with event_type so we can name folders properly)
             for url in new_urls - current_urls:
                 self.stream_manager.add_stream(
                     url=url,
                     output_path=output_path,
                     interval=interval,
                     resolution=resolution,
-                    paused=is_paused
+                    paused=is_paused,
+                    event_type=event_type
                 )
-        
+
         except Exception as e:
             logger.error(f"Error managing screenshot processes: {str(e)}")
             
@@ -249,6 +252,121 @@ class App:
             raise
         finally:
             self.quit()
+
+    def toggle_shutdown_when_done(self) -> None:
+        """Toggle whether the PC should shut down automatically after converting clips."""
+        current = bool(self.settings.get('shutdown_when_done', False))
+        self.settings.set('shutdown_when_done', not current)
+        self.system_tray.update_settings(self.settings.all)
+
+    def convert_subfolders_to_clips_and_cleanup(self, event_type: str = "") -> None:
+        """
+        Converts each subfolder that matches today's date+event_type to an MP4,
+        then removes the images and the subfolder.
+        If event_type is "", we convert everything for 'today'.
+        """
+        output_path = self.settings.get('output_path')
+        if not output_path:
+            logger.warning("No output_path configured; cannot convert.")
+            return
+
+        # For today's date
+        today_str = datetime.now().strftime('%Y_%m_%d')
+        # We'll match subfolders that start with e.g. "2025_02_07_Sunrise_" or "2025_02_07_"
+        # If event_type is empty => any subfolder matching today's date
+
+        try:
+            subfolders = [
+                f for f in os.listdir(output_path)
+                if os.path.isdir(os.path.join(output_path, f))
+            ]
+        except Exception as ex:
+            logger.error(f"Error listing subfolders in {output_path}: {ex}")
+            return
+
+        # Filter down to those that match the pattern
+        matched_subfolders = []
+        for folder in subfolders:
+            if folder.startswith(today_str):
+                if event_type:
+                    # If we have "Sunrise" or "Sunset", check it
+                    # e.g. "2025_02_07_Sunset_..."
+                    if f"_{event_type.capitalize()}_" in folder:
+                        matched_subfolders.append(folder)
+                else:
+                    # If event_type is "", we accept everything that starts with today's date
+                    matched_subfolders.append(folder)
+
+        if not matched_subfolders:
+            logger.info(f"No subfolders match {today_str} {event_type}, skipping conversion.")
+            return
+
+        logger.info(f"Converting subfolders for {today_str} {event_type}: {matched_subfolders}")
+
+        # We'll adapt the conversion logic from SystemTray._convert_subfolders_to_clips_ffmpeg,
+        # but do it here synchronously
+        fps = self.settings.get('fps', 60)
+
+        for folder_name in matched_subfolders:
+            folder_path = os.path.join(output_path, folder_name)
+            image_files = [
+                f for f in os.listdir(folder_path)
+                if f.lower().endswith(".jpg")
+            ]
+            if not image_files:
+                logger.info(f"No images found in {folder_name}, skipping.")
+                continue
+
+            # Sort them
+            image_files.sort()
+
+            logger.info(f"Renaming {len(image_files)} images in '{folder_name}' for FFmpeg sequence.")
+            # rename to frame0001.jpg, frame0002.jpg, etc.
+            for i, old_filename in enumerate(image_files, start=1):
+                new_filename = f"frame{i:04d}.jpg"
+                old_path = os.path.join(folder_path, old_filename)
+                new_path = os.path.join(folder_path, new_filename)
+                try:
+                    os.rename(old_path, new_path)
+                except Exception as e:
+                    logger.error(f"Could not rename {old_filename} -> {new_filename}: {e}")
+
+            # The final clip name can just be the folder name (plus .mp4):
+            output_clip = os.path.join(output_path, f"{folder_name}.mp4")
+            logger.info(f"Converting images in '{folder_name}' to '{output_clip}' at {fps} FPS")
+
+            cmd = [
+                "ffmpeg",
+                "-framerate", str(fps),
+                "-i", os.path.join(folder_path, "frame%04d.jpg"),
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                "-y",
+                output_clip
+            ]
+
+            process = subprocess.run(cmd, capture_output=True, text=True)
+            if process.returncode != 0:
+                logger.error(f"FFmpeg error for '{folder_name}':\n{process.stderr}")
+                continue
+
+            logger.info(f"Clip created: {output_clip}. Deleting images and folder...")
+
+            # remove all .jpg
+            for img_file in os.listdir(folder_path):
+                if img_file.lower().endswith(".jpg"):
+                    try:
+                        os.remove(os.path.join(folder_path, img_file))
+                    except Exception as ex:
+                        logger.warning(f"Could not delete file {img_file}: {ex}")
+
+            # remove the folder
+            try:
+                os.rmdir(folder_path)
+            except Exception as ex:
+                logger.warning(f"Could not remove folder {folder_path}: {ex}")
+
+        logger.info("All matching subfolders converted and cleaned up.")
 
 def main():
     """Main entry point."""
