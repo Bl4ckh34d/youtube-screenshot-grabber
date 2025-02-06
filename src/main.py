@@ -33,7 +33,6 @@ class App:
         self.stream_manager = StreamManager()
         self.scheduler = Scheduler(settings=self.settings)
         self._validation_thread = None
-        self._total_screenshots = 0  # Counter for total screenshots since app start
         
         # Only use Windows location if no location is saved
         saved_location = self.settings.get('location', {})
@@ -199,11 +198,17 @@ class App:
     def toggle_pause(self) -> None:
         """Toggle pause state."""
         if self.scheduler._paused:
+            # Currently paused: resume the scheduler and all stream processes.
             self.scheduler.resume()
             self.system_tray.set_paused(False)
+            for stream in self.stream_manager.streams.values():
+                stream.resume()
         else:
+            # Currently running: pause the scheduler and all stream processes.
             self.scheduler.pause()
             self.system_tray.set_paused(True)
+            for stream in self.stream_manager.streams.values():
+                stream.pause()
         self.system_tray.update_settings(self.settings.all)
     
     def quit(self) -> None:

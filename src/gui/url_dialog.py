@@ -57,16 +57,6 @@ class URLDialog:
         cancel_button = ctk.CTkButton(button_frame, text="Cancel", command=self.window.destroy)
         cancel_button.pack(side="right", padx=5)
     
-    def _validate_stream(self, url: str) -> bool:
-        """Check if URL is a valid and accessible live stream."""
-        try:
-            with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                return True
-        except Exception as e:
-            logger.warning(f"Invalid stream URL {url}: {str(e)}")
-            return False
-    
     def _is_valid_youtube_url(self, url: str) -> bool:
         """Check if the URL is a valid YouTube URL."""
         youtube_domains = ['youtube.com', 'youtu.be', 'www.youtube.com']
@@ -93,30 +83,6 @@ class URLDialog:
             # Pass all URLs for validation, close dialog immediately
             self.on_save(urls, [])  # Pass empty list as valid URLs initially
             self.window.destroy()
-    
-    def _handle_validation_result(self, valid_urls: List[str], invalid_urls: List[str]) -> None:
-        """Handle validation results and update UI."""
-        if valid_urls:
-            if invalid_urls:
-                self.status_label.configure(
-                    text=f"Found {len(valid_urls)} valid and {len(invalid_urls)} invalid URLs",
-                    text_color="orange"
-                )
-            else:
-                self.status_label.configure(
-                    text=f"All {len(valid_urls)} URLs are valid",
-                    text_color="green"
-                )
-            if self.on_save:
-                self.on_save(valid_urls)
-            self.window.destroy()
-        else:
-            self.status_label.configure(
-                text="No valid YouTube URLs found",
-                text_color="red"
-            )
-            self.save_button.configure(state="normal")
-            self.window.bell()
             
     def run(self) -> None:
         """Run the dialog."""

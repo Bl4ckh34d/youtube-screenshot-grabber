@@ -23,7 +23,8 @@ DEFAULT_SETTINGS = {
     'schedule_enabled': False,
     'time_window': 30,  # minutes
     'only_sunsets': False,
-    'only_sunrises': False
+    'only_sunrises': False,
+    'fps': "60"
 }
 
 class Settings:

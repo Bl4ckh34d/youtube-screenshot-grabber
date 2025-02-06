@@ -208,7 +208,6 @@ class ScreenshotCapture:
         logger.debug("Started prefetch thread")
 
 class StreamProcess:
-    """Manages continuous screenshot capture for a single stream."""
     def __init__(self, url: str, output_path: str, interval: int, resolution: str = '1080p'):
         self.url = url
         self.output_path = output_path
@@ -217,6 +216,17 @@ class StreamProcess:
         self.process = None
         self.stop_event = None
         self.screenshot_capture = ScreenshotCapture()
+        # Create a pause event that is shared with the child process.
+        self.pause_event = mp.Event()
+        self.pause_event.set()  # Initially running (not paused)
+
+    def pause(self):
+        # Clear the event: any call to wait() in the child will now block.
+        self.pause_event.clear()
+
+    def resume(self):
+        # Set the event: any blocked wait() calls will return immediately.
+        self.pause_event.set()
 
     def _capture_loop(self, stop_event: mp.Event):
         """Continuous capture loop running in its own process."""
@@ -225,26 +235,30 @@ class StreamProcess:
             # Get initial stream info
             stream_info = self.screenshot_capture.get_stream_info(self.url, self.resolution)
             logger.info(f"Got stream info for {self.url}")
-            
+
             while not stop_event.is_set():
+                # Wait here until the process is resumed. If the pause event is cleared,
+                # this will block until resume() is called.
+                self.pause_event.wait()
+
                 start_time = time()
-                
                 try:
-                    # Take screenshot directly in this process
+                    # Take screenshot directly in this process.
                     screenshot_path = self.screenshot_capture.capture_screenshot(stream_info, self.output_path)
                     if screenshot_path:
                         logger.info(f"Screenshot saved: {screenshot_path}")
                 except Exception as e:
                     logger.error(f"Error taking screenshot for {self.url}: {e}")
-                
-                # Calculate sleep time for next interval
+
+                # Calculate sleep time for the next capture
                 elapsed = time() - start_time
                 sleep_time = max(0, self.interval - elapsed)
                 logger.debug(f"Capture took {elapsed:.2f}s, sleeping for {sleep_time:.2f}s")
-                
-                # Sleep until next interval
+
+                # Sleep in small increments so the process can respond quickly to a pause command.
+                # Alternatively, you can simply call sleep(sleep_time) if quick responsiveness isn’t critical.
                 sleep(sleep_time)
-                
+
         except Exception as e:
             logger.error(f"Error in capture loop for {self.url}: {e}")
 

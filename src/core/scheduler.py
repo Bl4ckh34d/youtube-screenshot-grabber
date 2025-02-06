@@ -96,6 +96,10 @@ class Scheduler:
 
     def _should_capture(self) -> bool:
         """Determine if a capture should be made now."""
+        if self._paused:
+            logger.debug("Scheduler is paused, not capturing")
+            return False
+            
         if not self._schedule_enabled:
             logger.debug("Schedule disabled, capturing")
             return True  # If scheduling is disabled, always capture
@@ -119,7 +123,7 @@ class Scheduler:
     def _run(self) -> None:
         """Main scheduler loop."""
         while self._running:
-            if not self._paused and self._callback and self._should_capture():
+            if self._callback and self._should_capture():
                 try:
                     self._callback()
                 except Exception as e:

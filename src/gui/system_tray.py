@@ -6,7 +6,9 @@ import tkinter as tk
 from tkinter import filedialog
 import os
 from pathlib import Path
-
+import subprocess
+import os
+import threading
 from .location_dialog import LocationDialog
 from .url_dialog import URLDialog
 
@@ -19,6 +21,8 @@ class SystemTray:
         self.callbacks = callbacks
         self.icon = None
         self._paused = False
+        self._converting = False  # Track if clip conversion is in progress
+        self._conversion_process = None  # Store the conversion process
         
     def create_icon(self) -> Image:
         """Load the icon from assets folder."""
@@ -142,6 +146,39 @@ class SystemTray:
             if path:
                 self.callbacks['set_output_path'](path)
 
+        def convert_to_clips(_):
+            """
+            Iterate over each subfolder in 'output_path', combine its images into
+            a single MP4 using FFmpeg at 60 fps, then delete the images.
+            """
+            if self._converting:
+                return
+
+            self._converting = True
+            self.update_menu()  # Grey out the menu item
+
+            output_path = self.settings.get('output_path')
+            if not output_path:
+                logger.error("No output path set")
+                self._converting = False
+                self.update_menu()
+                return
+
+            # We'll run the process in a background thread so the GUI remains responsive.
+            def monitor_process():
+                try:
+                    # Do the actual conversion (iterating subfolders) in a helper method
+                    self._convert_subfolders_to_clips_ffmpeg(output_path)
+                except Exception as e:
+                    logger.error(f"Clip conversion error: {e}")
+                finally:
+                    self._converting = False
+                    self._conversion_process = None
+                    self.update_menu()  # Re-enable the menu item
+
+            thread = threading.Thread(target=monitor_process, daemon=True)
+            thread.start()
+
         return pystray.Menu(
             pystray.MenuItem(
                 "Set YouTube URL",
@@ -192,6 +229,12 @@ class SystemTray:
                         radio=True
                     )
                 )
+            ),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem(
+                "Convert to Clips",
+                action=convert_to_clips,
+                enabled=lambda item: not self._converting
             ),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(
@@ -248,3 +291,79 @@ class SystemTray:
         """Set the paused state."""
         self._paused = paused
         self.update_menu()
+
+    def _convert_subfolders_to_clips_ffmpeg(self, base_path: str) -> None:
+        """
+        For each subfolder in 'base_path', rename images to frame0001.jpg, frame0002.jpg, etc.,
+        then run FFmpeg to create a .mp4 at self.settings['fps'] fps. Upon success, delete the images.
+        """
+        subfolders = [
+            d for d in os.listdir(base_path)
+            if os.path.isdir(os.path.join(base_path, d))
+        ]
+        
+        fps = self.settings.get('fps', 60)
+
+        for folder_name in subfolders:
+            folder_path = os.path.join(base_path, folder_name)
+            
+            # Gather all .jpg images
+            image_files = [
+                f for f in os.listdir(folder_path)
+                if f.lower().endswith(".jpg")
+            ]
+            if not image_files:
+                logger.info(f"No .jpg images in '{folder_name}' - skipping.")
+                continue
+
+            # Sort them so the rename sequence (and final video sequence) matches the alphabetical order
+            image_files.sort()
+
+            # Rename them to frame0001.jpg, frame0002.jpg, etc.
+            logger.info(f"Renaming {len(image_files)} images in '{folder_name}'...")
+            for i, old_filename in enumerate(image_files, start=1):
+                new_filename = f"frame{i:04d}.jpg"  # adjust zero-padding as needed
+                old_path = os.path.join(folder_path, old_filename)
+                new_path = os.path.join(folder_path, new_filename)
+                try:
+                    os.rename(old_path, new_path)
+                except Exception as e:
+                    logger.error(f"Could not rename {old_filename} -> {new_filename}: {e}")
+
+            output_clip = os.path.join(base_path, f"{folder_name}.mp4")
+            logger.info(f"Converting renamed images to clip: '{output_clip}' at {fps} FPS")
+
+            # Build the FFmpeg command using the numeric pattern
+            cmd = [
+                "ffmpeg",
+                "-framerate", str(fps),
+                "-i", os.path.join(folder_path, "frame%04d.jpg"),
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                "-y",  # Overwrite
+                output_clip
+            ]
+
+            process = subprocess.run(cmd, capture_output=True, text=True)
+            if process.returncode != 0:
+                logger.error(f"FFmpeg error for '{folder_name}':\n{process.stderr}")
+                continue
+            
+            logger.info(f"Clip created: {output_clip}. Deleting images...")
+
+            # On success, delete images
+            renamed_files = [
+                f for f in os.listdir(folder_path)
+                if f.lower().startswith('frame') and f.lower().endswith('.jpg')
+            ]
+            for img_file in renamed_files:
+                try:
+                    os.remove(os.path.join(folder_path, img_file))
+                except Exception as ex:
+                    logger.warning(f"Could not delete file {img_file}: {ex}")
+
+            # (Optional) remove the empty folder
+            # try:
+            #     os.rmdir(folder_path)
+            # except OSError as e:
+            #     logger.warning(f"Could not remove folder {folder_path}: {e}")
