@@ -8,6 +8,7 @@ from pathlib import Path
 import yt_dlp
 from typing import Dict, Any, List, Optional
 import sys
+import subprocess
 
 # Add the project root to the Python path
 project_root = str(Path(__file__).parent.parent)
@@ -169,6 +170,9 @@ class App:
         
         # 2. Stop all stream processes
         self.stream_manager.stop_all()
+    
+        # 3. Start conversion if there are images to convert
+        self.convert_subfolders_to_clips_and_cleanup()
         
         os._exit(0)  # Hard kill
     
