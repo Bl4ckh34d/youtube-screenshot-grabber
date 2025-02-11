@@ -170,11 +170,10 @@ class Scheduler:
                         self._current_event_type
                     )
 
-                    # If "shutdown_when_done" is True, shut down system
+                    # If "shutdown_when_done" is True, call quit method
                     if self._app.settings.get('shutdown_when_done', False):
                         logger.info("Shutting down (shutdown_when_done is enabled).")
-                        import os
-                        os.system("shutdown /s /t 0")
+                        self._app.quit()  # Call the quit method instead of shutdown command
                     
                 self._was_in_window = False
                 self._current_event_type = ""
@@ -202,6 +201,3 @@ class Scheduler:
             self._app.capture_screenshot(event_type=event_type)
         except Exception as e:
             logger.error(f"Error starting processes: {e}")
-
-    
-

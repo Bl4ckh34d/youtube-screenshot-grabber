@@ -176,11 +176,10 @@ class SystemTray:
                 finally:
                     self._converting = False
                     self._conversion_process = None
-                    self.update_menu()  # Re-enable the menu item
+                    self.update_menu()
 
-                # Optionally, if you want to *unpause* automatically after conversion:
-                # if self._paused:
-                #     self.callbacks['toggle_pause']()
+                if self._paused:
+                    self.callbacks['toggle_pause']()
 
             thread = threading.Thread(target=monitor_process, daemon=True)
             thread.start()
