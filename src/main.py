@@ -170,9 +170,6 @@ class App:
         
         # 2. Stop all stream processes
         self.stream_manager.stop_all()
-    
-        # 3. Start conversion if there are images to convert
-        self.convert_subfolders_to_clips_and_cleanup()
         
         os._exit(0)  # Hard kill
     

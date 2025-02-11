@@ -173,7 +173,7 @@ class Scheduler:
                     # If "shutdown_when_done" is True, call quit method
                     if self._app.settings.get('shutdown_when_done', False):
                         logger.info("Shutting down (shutdown_when_done is enabled).")
-                        self._app.quit()  # Call the quit method instead of shutdown command
+                        self._app.quit()
                     
                 self._was_in_window = False
                 self._current_event_type = ""
